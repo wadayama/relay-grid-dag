@@ -1,6 +1,6 @@
 """Linear-Gaussian DAG-spec emitters and a thin mutual-information wrapper.
 
-Each emitter turns a :class:`~nearfield_dag.scene.Scene` (plus power/noise
+Each emitter turns a :class:`~relay_grid_dag._nearfield.scene.Scene` (plus power/noise
 settings) into a tuple
 
     spec = (num_nodes, parents, edge_mats, input_cov, noise_covs)

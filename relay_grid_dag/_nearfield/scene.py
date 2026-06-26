@@ -9,7 +9,7 @@ that decides whether they transmit, receive, or both:
     ris    -> co-located transmitter + receiver (passive, unit-modulus edge)
 
 The relay-vs-ris *distinction* (active gain matrix vs passive diagonal phase) is
-realised downstream in :mod:`nearfield_dag.dag`, exactly as ``radio-twin``
+realised downstream in :mod:`relay_grid_dag._nearfield.dag`, exactly as ``radio-twin``
 defers it to the objective. ``Scene`` only knows geometry and produces channel
 matrices ``H_k`` -- the single boundary at which the gaussian-dag machinery is
 fed. Movable nodes keep their centre as an autograd leaf so a mutual-information

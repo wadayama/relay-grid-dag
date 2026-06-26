@@ -17,7 +17,7 @@ import torch
 
 from . import _nearfield as nfd
 from ._nearfield.channel import K_WAVE
-from .grid import N_RELAY, P_RELAY, TX_XY, RX_XY, N_TX, N_RX
+from .grid import N_RELAY, P_RELAY, TX_XY, RX_XY, N_TX, N_RX, DIRECT_ATTEN
 
 __all__ = [
     "subset_mi", "direct_only_mi", "received_power_scores",
@@ -39,8 +39,8 @@ def subset_mi(scene, subset, *, k_wave: float = K_WAVE, P_relay: float = P_RELAY
         return nfd.mi(spec).item()
 
 
-def direct_only_mi(scene, *, k_wave: float = K_WAVE) -> float:
-    return subset_mi(scene, [], k_wave=k_wave)
+def direct_only_mi(scene, *, k_wave: float = K_WAVE, P_relay: float = P_RELAY) -> float:
+    return subset_mi(scene, [], k_wave=k_wave, P_relay=P_relay)
 
 
 # --------------------------------------------------------------------------- #
@@ -93,23 +93,24 @@ def select_greedy_mi(scene, names, K: int, *, k_wave: float = K_WAVE,
     return sorted(chosen)
 
 
-def select_exhaustive(scene, names, K: int, *, k_wave: float = K_WAVE):
+def select_exhaustive(scene, names, K: int, *, k_wave: float = K_WAVE,
+                      P_relay: float = P_RELAY):
     """Brute-force the best K-subset. Returns ``(best_indices, best_mi)``.
     Feasible only at small scale: C(L,K) MI evaluations."""
     best_set, best_mi = None, -np.inf
     for combo in itertools.combinations(range(len(names)), K):
-        mi = subset_mi(scene, [names[i] for i in combo], k_wave=k_wave)
+        mi = subset_mi(scene, [names[i] for i in combo], k_wave=k_wave, P_relay=P_relay)
         if mi > best_mi:
             best_mi, best_set = mi, combo
     return sorted(best_set), best_mi
 
 
 def swap_search(scene, names, init, K: int, *, k_wave: float = K_WAVE,
-                max_passes: int = 8):
+                P_relay: float = P_RELAY, max_passes: int = 8):
     """1-swap local search from ``init`` (list of indices). Returns
     ``(improved_indices, mi)``; greedily accepts any single swap that raises MI."""
     cur = list(init)
-    cur_mi = subset_mi(scene, [names[i] for i in cur], k_wave=k_wave)
+    cur_mi = subset_mi(scene, [names[i] for i in cur], k_wave=k_wave, P_relay=P_relay)
     for _ in range(max_passes):
         improved = False
         for a in list(cur):
@@ -117,7 +118,8 @@ def swap_search(scene, names, init, K: int, *, k_wave: float = K_WAVE,
                 if m in cur:
                     continue
                 trial = sorted([m if x == a else x for x in cur])
-                mi = subset_mi(scene, [names[i] for i in trial], k_wave=k_wave)
+                mi = subset_mi(scene, [names[i] for i in trial], k_wave=k_wave,
+                               P_relay=P_relay)
                 if mi > cur_mi + 1e-9:
                     cur, cur_mi, improved = trial, mi, True
         if not improved:
@@ -126,13 +128,14 @@ def swap_search(scene, names, init, K: int, *, k_wave: float = K_WAVE,
 
 
 def random_subset_stats(scene, names, K: int, *, trials: int = 200,
-                        seed: int = 0, k_wave: float = K_WAVE):
+                        seed: int = 0, k_wave: float = K_WAVE,
+                        P_relay: float = P_RELAY):
     """Mean / std / max / min MI over ``trials`` random K-subsets."""
     rng = np.random.default_rng(seed)
     L = len(names)
     vals = np.array([
         subset_mi(scene, [names[i] for i in rng.choice(L, size=K, replace=False)],
-                  k_wave=k_wave) for _ in range(trials)])
+                  k_wave=k_wave, P_relay=P_relay) for _ in range(trials)])
     return dict(mean=float(vals.mean()), std=float(vals.std()),
                 max=float(vals.max()), min=float(vals.min()))
 
@@ -142,7 +145,7 @@ def random_subset_stats(scene, names, K: int, *, trials: int = 200,
 # --------------------------------------------------------------------------- #
 def continuous_relays(K: int, lo, hi, *, starts: int = 4, iters: int = 300,
                       step: float = 0.04, d_min: float = 1.8, model: str = "near",
-                      direct_atten: float = 0.3, P_relay: float = P_RELAY,
+                      direct_atten: float = DIRECT_ATTEN, P_relay: float = P_RELAY,
                       tx_xy=TX_XY, rx_xy=RX_XY, n_tx: int = N_TX, n_rx: int = N_RX,
                       n_relay: int = N_RELAY, seed0: int = 0, return_all: bool = False):
     """Multi-start position-gradient PGA on K virtual (off-grid) relay centres.
@@ -176,7 +179,8 @@ def continuous_relays(K: int, lo, hi, *, starts: int = 4, iters: int = 300,
                 s.move(v, c.tolist())
         with torch.no_grad():
             R = nfd.mi(nfd.multirelay_merge(s, "tx", vn, "rx", P_relay=P_relay)).item()
-        final = np.array([s._nodes[v]["center"].detach().tolist() for v in vn])
+        # s.params are exactly the movable virtual-relay centres v0..v{K-1}, in order.
+        final = np.array([c.detach().tolist() for c in s.params])
         all_starts.append((final, R))
         if best is None or R > best[1]:
             best = (final, R)

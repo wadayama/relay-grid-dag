@@ -57,3 +57,38 @@ def test_continuous_to_discrete_recovers_selection():
     sidx, r_swap = rgd.swap_search(s, names, ridx, 2)
     _, o_mi = rgd.select_exhaustive(s, names, 2)
     assert r_swap >= 0.97 * o_mi
+
+
+def test_wideband_per_subcarrier():
+    """OFDM path: a shared set has a finite, band-varying per-subcarrier rate."""
+    s, names, _ = rgd.build_candidate_scene("near")
+    S = [names[i] for i in rgd.select_greedy_mi(s, names, 3)]
+    k_waves = rgd.subcarrier_wavenumbers(f_c=10.0, S=8, df=0.4)
+    rates = [rgd.subset_mi(s, S, k_wave=k) for k in k_waves]
+    assert all(r > 0 for r in rates) and len(rates) == 8
+    assert max(rates) > min(rates)                       # beam squint varies the rate
+
+
+def test_naive_baselines_and_k0():
+    """Distance baseline is well-formed; K=0 reduces every selector to the direct link."""
+    s, names, coords = rgd.build_candidate_scene("near")
+    di = rgd.select_distance(coords, 3)
+    assert len(di) == 3 and len(set(di)) == 3 and all(0 <= i < len(names) for i in di)
+    # K=0: every selector returns the empty set, whose MI is the direct link.
+    assert rgd.select_greedy_mi(s, names, 0) == []
+    assert rgd.select_received_power(s, names, 0) == []
+    assert rgd.select_distance(coords, 0) == []
+    assert rgd.subset_mi(s, []) == rgd.direct_only_mi(s)
+
+
+def test_p_relay_plumbed_through_selectors():
+    """The P_relay knob is honored consistently (subset_mi, greedy, exhaustive, swap)."""
+    s, names, _ = rgd.build_candidate_scene("near")
+    sub = [names[6], names[17]]
+    lo = rgd.subset_mi(s, sub, P_relay=10.0)
+    hi = rgd.subset_mi(s, sub, P_relay=1000.0)
+    assert hi > lo                                       # more relay power -> more MI
+    # exhaustive must use the passed P_relay, not the default, end to end.
+    _, mi_lo = rgd.select_exhaustive(s, names, 2, P_relay=10.0)
+    _, mi_hi = rgd.select_exhaustive(s, names, 2, P_relay=1000.0)
+    assert mi_hi > mi_lo

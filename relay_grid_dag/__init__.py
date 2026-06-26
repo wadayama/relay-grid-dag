@@ -42,3 +42,19 @@ from .selection import (
 )
 
 __version__ = "0.1.0"
+
+__all__ = [
+    # physics (vendored engine)
+    "Scene", "mi", "multirelay_merge", "diamond", "single_link", "ris_branch",
+    "near_field_channel", "far_field_channel", "distances",
+    "subcarrier_frequencies", "subcarrier_wavenumbers", "wideband_mi",
+    "af_gain", "physical_channel", "waterfilling_capacity",
+    "project_box", "project_min_separation", "repulsion_penalty",
+    "ula", "movable", "ArrayGeometry", "DTYPE", "RDTYPE", "K_WAVE", "viz",
+    # grid + selection (this package)
+    "grid_coords", "build_candidate_scene",
+    "subset_mi", "direct_only_mi", "received_power_scores",
+    "select_received_power", "select_distance", "select_greedy_mi",
+    "select_exhaustive", "swap_search", "random_subset_stats",
+    "continuous_relays", "round_to_grid",
+]

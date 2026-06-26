@@ -54,7 +54,7 @@ def wideband_mi(spec_fn, k_waves, *, weights=None, output_node=None,
     All subcarriers share the scene's movable centres, so a single
     ``U.backward()`` returns the position gradient summed over the band. With one
     wavenumber (and the default weight) this reduces to a plain single-carrier
-    :func:`~nearfield_dag.dag.mi`. ``weights`` defaults to all ones.
+    :func:`~relay_grid_dag._nearfield.dag.mi`. ``weights`` defaults to all ones.
     """
     ks = list(k_waves)
     if not ks:
