@@ -29,6 +29,7 @@ classifiers = [
 ]
 dependencies = [
     "gaussian-dag",
+    "cmi-dag",
     "torch>=2.12",
     "numpy>=2.0",
 ]
@@ -54,6 +55,7 @@ Issues = "https://github.com/wadayama/relay-grid-dag/issues"
 # canonical here; the upstream repo continues as a separate movable-relay theme.
 [tool.uv.sources]
 gaussian-dag = { git = "https://github.com/wadayama/gaussian-dag" }
+cmi-dag = { git = "https://github.com/wadayama/cmi-dag" }
 
 [build-system]
 requires = ["hatchling"]

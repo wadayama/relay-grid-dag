@@ -3,6 +3,14 @@ revision = 3
 requires-python = ">=3.12"
 
 [[package]]
+name = "cmi-dag"
+version = "0.6.0"
+source = { git = "https://github.com/wadayama/cmi-dag#21af74f09203f4d8ac7cae32ae32e54dbf489049" }
+dependencies = [
+    { name = "torch" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -803,6 +811,7 @@ name = "relay-grid-dag"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cmi-dag" },
     { name = "gaussian-dag" },
     { name = "numpy" },
     { name = "torch" },
@@ -820,6 +829,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cmi-dag", git = "https://github.com/wadayama/cmi-dag" },
     { name = "gaussian-dag", git = "https://github.com/wadayama/gaussian-dag" },
     { name = "matplotlib", marker = "extra == 'examples'", specifier = ">=3.10" },
     { name = "numpy", specifier = ">=2.0" },

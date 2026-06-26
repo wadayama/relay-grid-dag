@@ -41,6 +41,12 @@ from .selection import (
     continuous_relays, round_to_grid,
 )
 
+# --- multi-pair interference layer (conditional MI via cmi-dag) -------------- #
+from .multipair import (
+    build_pair_scene, pair_rates, weighted_sum_rate, min_rate,
+    select_greedy_sumrate, select_exhaustive_sumrate, received_power_pairs,
+)
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -57,4 +63,7 @@ __all__ = [
     "select_received_power", "select_distance", "select_greedy_mi",
     "select_exhaustive", "swap_search", "random_subset_stats",
     "continuous_relays", "round_to_grid",
+    # multi-pair interference (this package, via cmi-dag)
+    "build_pair_scene", "pair_rates", "weighted_sum_rate", "min_rate",
+    "select_greedy_sumrate", "select_exhaustive_sumrate", "received_power_pairs",
 ]

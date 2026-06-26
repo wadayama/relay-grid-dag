@@ -26,8 +26,10 @@ reimplemented here. The mathematics is summarised in [`MATH.md`](MATH.md).
 
 This package depends **only on public information**, so it is publishable as-is:
 
-- **`gaussian-dag`** (public, pinned): the K-recursion log-det MI kernel — an
-  external dependency, not vendored.
+- **`gaussian-dag`** (public, pinned): the single-root K-recursion log-det MI
+  kernel — an external dependency, not vendored.
+- **`cmi-dag`** (public, pinned): the multi-root conditional-MI kernel
+  `I(A;B|C)` — used by the multi-pair interference layer; external, not vendored.
 - **near-field physics** (`relay_grid_dag/_nearfield/`): a **vendored, frozen copy**
   of [`nearfield-dag`](https://github.com/wadayama/nearfield-dag) (spherical-wave
   LoS channels + linear-Gaussian DAG specs, MIT, same author). It is kept
@@ -45,13 +47,13 @@ channel matrix `H_k`.
 | --- | --- |
 | [`gaussian-dag`](https://github.com/wadayama/gaussian-dag) | K-recursion log-det MI on linear Gaussian DAGs (the MI kernel; our dependency). |
 | [`nearfield-dag`](https://github.com/wadayama/nearfield-dag) | Near-field spherical-wave channels + movable relays / position autodiff (origin of the vendored physics; now a movable-relay theme). |
-| [`cmi-dag`](https://github.com/wadayama/cmi-dag) | Multi-root + conditional MI on disjoint subsets (the intended multi-pair interference engine). |
+| [`cmi-dag`](https://github.com/wadayama/cmi-dag) | Multi-root + conditional MI `I(A;B\|C)` on disjoint subsets — the multi-pair interference engine (integrated; see `multipair.py`). |
 | **`relay-grid-dag`** (this repo) | **K-of-L candidate-relay selection** for near-field channel shaping. |
 
 ## Requirements
 
 - Python ≥ 3.12
-- `gaussian-dag`, PyTorch ≥ 2.12, NumPy ≥ 2.0 (installed as dependencies)
+- `gaussian-dag`, `cmi-dag`, PyTorch ≥ 2.12, NumPy ≥ 2.0 (installed as dependencies)
 - [`uv`](https://docs.astral.sh/uv/) for environment management (recommended)
 
 ## Installation
@@ -161,6 +163,22 @@ All symbols below are re-exported from the top-level `relay_grid_dag` package.
 | `continuous_relays(K, lo, hi, *, starts=4, iters=300, d_min=1.8, return_all=False)` | Multi-start position-gradient PGA on `K` virtual relays → `(centres, MI)` (or all starts). |
 | `round_to_grid(final, coords)` | Map virtual relay centres to nearest free candidate sites. |
 
+### Multi-pair interference (this package, via `cmi-dag`)
+
+`M` Tx/Rx pairs share the relay grid; each active relay forwards every transmitter
+(shared medium), so it is double-edged — it can carry interference too. Rates come
+from the multi-root conditional MI.
+
+| Symbol | Purpose |
+| --- | --- |
+| `build_pair_scene(pairs=…, *, n_relay=4)` | Scene with `M` pairs (`tx{u}`/`rx{u}`) + candidate grid. Returns `(scene, names, coords)`. |
+| `pair_rates(scene, M, active, *, cross_atten=0.3, …)` | Per-pair `{"tin": [..], "free": [..]}`: `R_u^TIN = I(X_u;Y_u\|∅)` (interference as noise) and `R_u^free = I(X_u;Y_u\|X_others)` (genie bound). |
+| `weighted_sum_rate(scene, M, active, *, weights=None)` | `Σ_u w_u R_u^TIN` objective. |
+| `min_rate(scene, M, active)` | Max-min objective `min_u R_u^TIN`. |
+| `select_greedy_sumrate(scene, M, names, K, *, objective=…)` | Greedy on the multi-pair objective. |
+| `select_exhaustive_sumrate(scene, M, names, K, *, objective=…)` | Brute-force best K-subset (small L). |
+| `received_power_pairs(scene, M, names, K)` | Interference-blind baseline (desired cascade gain). |
+
 ### Physics (re-exported from the vendored near-field engine)
 
 | Symbol | Purpose |
@@ -217,6 +235,9 @@ achieves `SE_HD = (1/2) SE_FD`. We keep the ½ out of the code: figures/tables r
 - **Optimization.** Selection is combinatorial; greedy is near-oracle but not
   optimal, and the continuous PGA is non-convex (multi-start recommended). Exhaustive
   search is feasible only at small `L`.
+- **Multi-pair.** Rates use Gaussian inputs and treat interference as noise (TIN);
+  `pair_rates` also returns the interference-free genie bound. Joint encoding/
+  decoding, rate splitting, and per-subcarrier OFDM multi-pair are out of scope.
 
 ## Roadmap
 

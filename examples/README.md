@@ -19,6 +19,7 @@ uv run python examples/<script>.py        # figures -> examples/out/
 | `s4_ofdm_shared.py` | OFDM shared-activation (beam-squint) cost |
 | `s2b_robustness.py` | is the selection value systematic? (60 random configs) |
 | `s3b_scaling.py` | scaling L=25→400: greedy cheap & near-optimal |
+| `multipair_interference.py` | 2 interfering pairs: interference-aware selection (cmi-dag CMI) |
 | `run_all.py` | run S1–S4 and print a PASS/FAIL summary |
 
 ## Interactive demo
