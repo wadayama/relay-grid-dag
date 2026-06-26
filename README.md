@@ -69,11 +69,16 @@ relay-grid-dag/
 └── pyproject.toml
 ```
 
+## Duplexing convention
+
+`mi()` / `subset_mi()` return the **idealized full-duplex** value
+`SE_FD = I(X;Y)` (the leakage-free / no-self-interference, acyclic DAG — what the
+model computes). A half-duplex realisation with a sum-combining receiver achieves
+`SE_HD = (1/2) SE_FD`. We keep the 1/2 out of the code: figures/tables report
+`SE (bits/s/Hz, FD)` and the paper states `SE_HD = (1/2) SE_FD` explicitly.
+
 ## Roadmap
 
-- Half-duplex reporting helper: we report the idealized full-duplex value
-  `SE (bits/s/Hz, FD)`; a half-duplex realisation (sum-combining receiver) achieves
-  `SE_HD = (1/2) SE_FD`. Add a `spectral_efficiency() = 0.5 * mi(...)` helper.
 - Multi-pair interference (shared-subcarrier) via the sibling `cmi-dag`.
 
 ## License
