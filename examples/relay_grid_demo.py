@@ -29,7 +29,12 @@ import sys
 import matplotlib
 SELFTEST = "--selftest" in sys.argv
 SNAPSHOT = "--snapshot" in sys.argv
-matplotlib.use("Agg" if (SELFTEST or SNAPSHOT) else "macosx")
+if SELFTEST or SNAPSHOT:
+    matplotlib.use("Agg")            # headless: identical on every platform
+# else: let matplotlib auto-select the platform's interactive GUI backend
+# (macosx / Qt / Tk), so the live window works for anyone who cloned the repo,
+# not only on macOS. The window needs a desktop GUI backend; if none is available
+# (e.g. a headless server), use --snapshot / --selftest instead.
 import matplotlib.pyplot as plt
 import numpy as np
 import torch

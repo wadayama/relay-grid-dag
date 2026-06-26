@@ -33,5 +33,10 @@ uv run python examples/relay_grid_demo.py --snapshot # shareable still -> out/re
 uv run python examples/relay_grid_demo.py --selftest # headless check
 ```
 
+The live window uses matplotlib's default interactive backend for your platform
+(macosx / Qt / Tk), so it works cross-platform on any desktop with a GUI toolkit.
+On a headless machine (no display), use `--snapshot` / `--selftest`, which render
+with the Agg backend and work everywhere.
+
 Note: MI / SE is reported as the idealized full-duplex value `SE (bits/s/Hz, FD)`;
 a half-duplex realisation (sum-combining receiver) achieves `SE_HD = (1/2) SE_FD`.
