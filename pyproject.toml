@@ -1,0 +1,66 @@
+[project]
+name = "relay-grid-dag"
+version = "0.1.0"
+description = "Near-field Programmable Relay Grid: sparse activation / selection of candidate relays for geometry-aware mutual-information channel shaping, on the gaussian-dag K-recursion."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Tadashi Wadayama", email = "wadayama@nitech.ac.jp" },
+]
+keywords = [
+    "near-field",
+    "programmable-relay-grid",
+    "relay-selection",
+    "sparse-activation",
+    "mimo",
+    "mutual-information",
+    "gaussian-dag",
+    "ofdm",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "gaussian-dag",
+    "torch>=2.12",
+    "numpy>=2.0",
+]
+
+[project.optional-dependencies]
+examples = [
+    "matplotlib>=3.10",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/wadayama/relay-grid-dag"
+Repository = "https://github.com/wadayama/relay-grid-dag"
+Issues = "https://github.com/wadayama/relay-grid-dag/issues"
+
+# Depend only on the public gaussian-dag (K-recursion MI kernel). The near-field
+# physics (spherical-wave LoS channels + DAG specs) is vendored under
+# relay_grid_dag/_nearfield/ -- a frozen copy of wadayama/nearfield-dag, kept
+# canonical here; the upstream repo continues as a separate movable-relay theme.
+[tool.uv.sources]
+gaussian-dag = { git = "https://github.com/wadayama/gaussian-dag" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["relay_grid_dag"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
