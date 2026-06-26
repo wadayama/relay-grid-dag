@@ -64,17 +64,17 @@ relay-grid-dag/
 │   ├── selection.py     K-of-L selection: greedy / swap / exhaustive / baselines
 │   │                    + continuous-to-discrete (position-gradient PGA → rounding)
 │   └── __init__.py      public API (physics re-exports + selection layer)
-├── experiments/         paper experiments (reproducible figures)   [to be added]
+├── examples/            runnable studies (S1–S4, robustness, scaling) + interactive demo
 ├── tests/               regression tests (physics + selection)
 └── pyproject.toml
 ```
 
 ## Roadmap
 
-- Half-duplex two-phase AF model (the paper's primary duplexing assumption: 1/2
-  pre-log, `Y1` direct + `Y2` relay-forward) — `halfduplex.py`.
+- Half-duplex reporting helper: we report the idealized full-duplex value
+  `SE (bits/s/Hz, FD)`; a half-duplex realisation (sum-combining receiver) achieves
+  `SE_HD = (1/2) SE_FD`. Add a `spectral_efficiency() = 0.5 * mi(...)` helper.
 - Multi-pair interference (shared-subcarrier) via the sibling `cmi-dag`.
-- Migrate the smoke study (S1–S4, robustness, scaling) into `experiments/`.
 
 ## License
 

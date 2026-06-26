@@ -30,12 +30,12 @@ __all__ = [
 # --------------------------------------------------------------------------- #
 # MI of a chosen subset (the single physics call the rest is built on).        #
 # --------------------------------------------------------------------------- #
-def subset_mi(scene, subset, *, k_wave: float = K_WAVE, p_relay: float = P_RELAY) -> float:
+def subset_mi(scene, subset, *, k_wave: float = K_WAVE, P_relay: float = P_RELAY) -> float:
     """I(X;Y) in bits for the diamond formed by activating ``subset`` relays plus
     the (attenuated) direct path. ``subset=[]`` is the direct-only link."""
     with torch.no_grad():
         spec = nfd.multirelay_merge(scene, "tx", list(subset), "rx",
-                                    P_relay=p_relay, k_wave=k_wave)
+                                    P_relay=P_relay, k_wave=k_wave)
         return nfd.mi(spec).item()
 
 
@@ -75,7 +75,8 @@ def select_distance(coords, K: int, tx=TX_XY, rx=RX_XY) -> list[int]:
     return sorted(np.argsort(d)[:K].tolist())
 
 
-def select_greedy_mi(scene, names, K: int, *, k_wave: float = K_WAVE) -> list[int]:
+def select_greedy_mi(scene, names, K: int, *, k_wave: float = K_WAVE,
+                     P_relay: float = P_RELAY) -> list[int]:
     """Forward greedy: repeatedly add the candidate with the largest MI gain.
     O(K*L) MI evaluations; deterministic; near-oracle in practice."""
     chosen: list[int] = []
@@ -83,7 +84,8 @@ def select_greedy_mi(scene, names, K: int, *, k_wave: float = K_WAVE) -> list[in
     for _ in range(K):
         best_j, best_mi = None, -np.inf
         for j in remaining:
-            mi = subset_mi(scene, [names[i] for i in chosen + [j]], k_wave=k_wave)
+            mi = subset_mi(scene, [names[i] for i in chosen + [j]], k_wave=k_wave,
+                           P_relay=P_relay)
             if mi > best_mi:
                 best_mi, best_j = mi, j
         chosen.append(best_j)
@@ -140,7 +142,7 @@ def random_subset_stats(scene, names, K: int, *, trials: int = 200,
 # --------------------------------------------------------------------------- #
 def continuous_relays(K: int, lo, hi, *, starts: int = 4, iters: int = 300,
                       step: float = 0.04, d_min: float = 1.8, model: str = "near",
-                      direct_atten: float = 0.3, p_relay: float = P_RELAY,
+                      direct_atten: float = 0.3, P_relay: float = P_RELAY,
                       tx_xy=TX_XY, rx_xy=RX_XY, n_tx: int = N_TX, n_rx: int = N_RX,
                       n_relay: int = N_RELAY, seed0: int = 0, return_all: bool = False):
     """Multi-start position-gradient PGA on K virtual (off-grid) relay centres.
@@ -164,7 +166,7 @@ def continuous_relays(K: int, lo, hi, *, starts: int = 4, iters: int = 300,
             for c in s.params:
                 if c.grad is not None:
                     c.grad.zero_()
-            I = nfd.mi(nfd.multirelay_merge(s, "tx", vn, "rx", P_relay=p_relay))
+            I = nfd.mi(nfd.multirelay_merge(s, "tx", vn, "rx", P_relay=P_relay))
             I.backward()
             with torch.no_grad():
                 stepped = [c.detach() + step * c.grad for c in s.params]
@@ -173,7 +175,7 @@ def continuous_relays(K: int, lo, hi, *, starts: int = 4, iters: int = 300,
             for v, c in zip(vn, sep):
                 s.move(v, c.tolist())
         with torch.no_grad():
-            R = nfd.mi(nfd.multirelay_merge(s, "tx", vn, "rx", P_relay=p_relay)).item()
+            R = nfd.mi(nfd.multirelay_merge(s, "tx", vn, "rx", P_relay=P_relay)).item()
         final = np.array([s._nodes[v]["center"].detach().tolist() for v in vn])
         all_starts.append((final, R))
         if best is None or R > best[1]:
