@@ -77,10 +77,22 @@ relay-grid-dag/
 │   │                    + continuous-to-discrete (position-gradient PGA → rounding)
 │   └── __init__.py      public API (physics re-exports + selection layer)
 ├── examples/            runnable studies (S1–S4, robustness, scaling) + interactive demo
+├── docs/                a five-part tutorial walkthrough
+├── references/          background notes + key literature
 ├── tests/               regression tests (physics + selection)
 ├── MATH.md              mathematical foundations (selection layer)
 └── pyproject.toml
 ```
+
+## Documentation
+
+- [`MATH.md`](MATH.md) — mathematical foundations of the selection layer (merge
+  channel MI, the selection problem, the strategies, continuous-to-discrete, OFDM
+  shared activation, and the FD/HD duplexing convention).
+- [`docs/`](docs/) — a five-part tutorial, from a first selection to the duplexing
+  convention.
+- Per-directory `README.md` files document the package (`relay_grid_dag/`), the
+  runnable studies (`examples/`), the tests (`tests/`), and the references.
 
 ## Quick start
 
@@ -208,7 +220,6 @@ achieves `SE_HD = (1/2) SE_FD`. We keep the ½ out of the code: figures/tables r
 
 ## Roadmap
 
-- Tutorials under `docs/` and a literature/notes `references/` directory.
 - Multi-pair interference (shared-subcarrier) via the sibling `cmi-dag`.
 
 ## Citation
