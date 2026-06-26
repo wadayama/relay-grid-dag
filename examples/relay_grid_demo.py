@@ -10,16 +10,16 @@ the right choice is non-obvious and geometry-dependent.
     Scene (Tx, Rx, L candidate relays)
       -> greedy-MI / received-power selection of K     [relay_grid_dag]
       -> mi(multirelay_merge) per candidate subset     [gaussian-dag K-recursion]
-    Background: carrier-power field of the greedy-selected relays (nfd.viz).
+    Background: carrier-power field of the greedy-selected relays (relay_grid_dag.viz).
 
 Controls:
     drag Tx (red triangle)   move the transmitter
     radio buttons (left)     number of activated relays K (1-4)
     q                        quit
 
-Run (window):     <venv>/bin/python relay_grid_demo.py
-Headless check:   <venv>/bin/python relay_grid_demo.py --selftest
-Shareable still:  <venv>/bin/python relay_grid_demo.py --snapshot
+Run (window):     uv run python examples/relay_grid_demo.py
+Headless check:   uv run python examples/relay_grid_demo.py --selftest
+Shareable still:  uv run python examples/relay_grid_demo.py --snapshot
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-import _common as C
+import relay_grid_dag as rgd
 from relay_grid_dag import viz
 
 # ------------------------------- configuration -------------------------------
@@ -45,38 +45,41 @@ GRID_X = (5.0, 15.0)
 GRID_Y = (-6.0, 6.0)
 GRID_NX = GRID_NY = 5            # L = 25 candidate sites
 DIRECT_ATTEN = 0.4              # partially blocked direct -> relays carry value
+N_TX = N_RX = 8                 # Tx / Rx antennas (uniform linear arrays)
+N_RELAY = 4                     # antennas per candidate relay
+P_RELAY = 100.0                 # per-relay output power (Tx power = 100)
 MAX_K = 4
 HEAT_NX, HEAT_NY = 150, 110
 GREEDY_COL = "#ff2d55"          # selected (greedy-MI) relays
 F_C, S_SC, DF = 10.0, 8, 0.4    # OFDM band for the per-subcarrier rate inset
-_K_WAVES = None                 # lazily filled (needs nearfield_dag imported)
+_K_WAVES = None                 # lazily filled (needs relay_grid_dag imported)
 
 _gx, _gy = np.meshgrid(np.linspace(*PLANE_X, HEAT_NX), np.linspace(*PLANE_Y, HEAT_NY))
-_GRID = torch.tensor(np.stack([_gx.ravel(), _gy.ravel()], axis=1), dtype=C.nfd.RDTYPE)
-_COORDS = C.grid_coords(GRID_NX, GRID_NY, GRID_X, GRID_Y)
+_GRID = torch.tensor(np.stack([_gx.ravel(), _gy.ravel()], axis=1), dtype=rgd.RDTYPE)
+_COORDS = rgd.grid_coords(GRID_NX, GRID_NY, GRID_X, GRID_Y)
 
 
 def build_scene(tx_c):
     """Scene with a (drag-movable) Tx, fixed Rx, and the fixed candidate grid."""
-    s = C.nfd.Scene(model="near", direct_atten=DIRECT_ATTEN, spacing=0.5)
-    s.add_node("tx", list(tx_c), C.N_TX, "source")
-    s.add_node("rx", list(RX_C), C.N_RX, "sink")
+    s = rgd.Scene(model="near", direct_atten=DIRECT_ATTEN, spacing=0.5)
+    s.add_node("tx", list(tx_c), N_TX, "source")
+    s.add_node("rx", list(RX_C), N_RX, "sink")
     names = []
     for i, (x, y) in enumerate(_COORDS):
-        s.add_node(f"c{i}", [float(x), float(y)], C.N_RELAY, "relay")
+        s.add_node(f"c{i}", [float(x), float(y)], N_RELAY, "relay")
         names.append(f"c{i}")
     return s, names
 
 
-def selections(scene, names, K, *, wideband=True, P_relay=C.P_RELAY):
+def selections(scene, names, K, *, wideband=True, P_relay=P_RELAY):
     """Return (greedy_idx, recvpow_idx, dict of sum-rates) for the current
     geometry. ``wideband`` picks the greedy criterion: the true OFDM sum-rate
     ``sum_k I_k`` (committed on drop) or a fast single-carrier proxy (live drag).
     Reported values are always the wideband sum-rate of the selected set.
     ``P_relay`` is the per-relay output power (relay-vs-Tx power knob)."""
     g_idx = (select_greedy_sumrate(scene, names, K, P_relay) if wideband
-             else C.select_greedy_mi(scene, names, K, P_relay=P_relay))
-    r_idx = C.select_received_power(scene, names, K)
+             else rgd.select_greedy_mi(scene, names, K, P_relay=P_relay))
+    r_idx = rgd.select_received_power(scene, names, K)
     sr = dict(
         greedy=sum_rate(scene, names, g_idx, P_relay),
         recv=sum_rate(scene, names, r_idx, P_relay),
@@ -85,40 +88,40 @@ def selections(scene, names, K, *, wideband=True, P_relay=C.P_RELAY):
     return g_idx, r_idx, sr
 
 
-def field_image(scene, names, g_idx, P_relay=C.P_RELAY):
+def field_image(scene, names, g_idx, P_relay=P_RELAY):
     sel = [names[i] for i in g_idx]
     db = viz.carrier_field(scene, "tx", "rx", _GRID, relays=sel,
-                           P_tx=C.P_RELAY, P_relay=P_relay)
+                           P_tx=P_RELAY, P_relay=P_relay)
     return db.reshape(HEAT_NY, HEAT_NX)
 
 
-def per_sc_rates(scene, names, g_idx, P_relay=C.P_RELAY):
+def per_sc_rates(scene, names, g_idx, P_relay=P_RELAY):
     """Per-subcarrier MI I_k of the (band-shared) selected relay set."""
     global _K_WAVES
     if _K_WAVES is None:
-        _K_WAVES = C.nfd.subcarrier_wavenumbers(F_C, S_SC, DF)
+        _K_WAVES = rgd.subcarrier_wavenumbers(F_C, S_SC, DF)
     sel = [names[i] for i in g_idx]
-    return np.array([C.subset_mi(scene, sel, k_wave=kw, P_relay=P_relay)
+    return np.array([rgd.subset_mi(scene, sel, k_wave=kw, P_relay=P_relay)
                      for kw in _K_WAVES])
 
 
-def sum_rate(scene, names, idx, P_relay=C.P_RELAY):
+def sum_rate(scene, names, idx, P_relay=P_RELAY):
     """Wideband simple sum-rate ``sum_k I_k`` (unit weights) of the selected set."""
     return float(per_sc_rates(scene, names, idx, P_relay).sum())
 
 
-def select_greedy_sumrate(scene, names, K, P_relay=C.P_RELAY):
+def select_greedy_sumrate(scene, names, K, P_relay=P_RELAY):
     """Forward greedy that maximizes the wideband sum-rate ``sum_k I_k`` (the S4
     OFDM criterion): the activation set ``a`` is shared across all subcarriers."""
     global _K_WAVES
     if _K_WAVES is None:
-        _K_WAVES = C.nfd.subcarrier_wavenumbers(F_C, S_SC, DF)
+        _K_WAVES = rgd.subcarrier_wavenumbers(F_C, S_SC, DF)
     chosen, remaining = [], set(range(len(names)))
     for _ in range(K):
         best_j, best = None, -np.inf
         for j in remaining:
             sel = [names[i] for i in chosen + [j]]
-            val = sum(C.subset_mi(scene, sel, k_wave=kw, P_relay=P_relay)
+            val = sum(rgd.subset_mi(scene, sel, k_wave=kw, P_relay=P_relay)
                       for kw in _K_WAVES)
             if val > best:
                 best, best_j = val, j
@@ -244,7 +247,7 @@ def interactive():
 
     st = {"tx": np.array([0.0, 0.0]), "rx": np.array(RX_C, dtype=float),
           "drag": None, "K": 3, "pmult": 1}
-    P = lambda: st["pmult"] * C.P_RELAY     # current per-relay output power
+    P = lambda: st["pmult"] * P_RELAY     # current per-relay output power
     s, names = build_scene(st["tx"])
 
     matplotlib.rcParams["toolbar"] = "None"      # no pan/zoom rubber-band on drag
