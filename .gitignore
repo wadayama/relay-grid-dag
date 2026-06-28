@@ -18,3 +18,9 @@ paper/*.fls
 paper/*.fdb_latexmk
 # exported session transcripts
 *-this-session-is-being-continued-from-a-previous-c.txt
+
+# legacy conversation logs (personal transcripts, Dropbox-only)
+notes/legacy/*.txt
+
+# local-only rescued legacy notes (kept on disk/Dropbox, NOT on GitHub)
+notes/legacy/
