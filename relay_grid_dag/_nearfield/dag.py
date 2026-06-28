@@ -87,30 +87,50 @@ def diamond(scene, src, relay, dst, *, P_tx=100.0, P_relay=100.0,
 
 
 def multirelay_merge(scene, src, relays, dst, *, P_tx=100.0, P_relay=100.0,
-                     sigma_r=1.0, sigma_d=1.0, direct=True, k_wave=K_WAVE) -> DagSpec:
-    """Multi-branch merge: ``K`` AF relays + optional direct path, isotropic Tx.
+                     sigma_r=1.0, sigma_d=1.0, direct=True, k_wave=K_WAVE,
+                     precoder=None, relay_mats=None) -> DagSpec:
+    """Multi-branch merge: ``K`` AF relays + optional direct path.
 
     Nodes: 0 = X, 1..K = relays, K+1 = Y. The K-recursion carries the relay-relay
     cross-covariances at the merge node (shared source). ``k_wave`` selects the
     subcarrier (default carrier / single-carrier).
+
+    Two optional precoding inputs turn the isotropic, scalar-AF model into the
+    precoded merge channel of ``SPEC.md`` (the defaults reproduce the former
+    exactly):
+
+    - ``precoder``: a Tx precoder ``F`` (shape ``(n_tx, d)``). With ``F`` the root
+      is ``X ~ CN(0, I_d)`` and ``F`` multiplies every source edge
+      (``input_cov = I``, edge ``= H @ F``); without it the source emits with the
+      isotropic ``input_cov = (P_tx/n_tx) I`` and unscaled edges.
+    - ``relay_mats``: per-relay matrices ``[W_1, ..., W_K]`` (each ``(n_l, n_l)``),
+      so the relay-to-destination edge is ``H_rd @ W`` instead of the scalar AF
+      gain ``g * H_rd``. ``W = g I`` recovers the scalar case.
+
+    The relay-power budget ``tr(W K_ll W^H) <= P_relay`` (with the relay received
+    covariance ``K_ll = A_sr input_cov A_sr^H + sigma_r^2 I``) is enforced by the
+    caller; the scalar default sets ``g = sqrt(P_relay / tr K_ll)`` and saturates it.
     """
     Kr = len(relays)
-    n_tx = scene.n_ant(src)
-    input_cov = (P_tx / n_tx) * _eye(n_tx)
+    input_cov, apply = _source_cov(scene, src, P_tx, precoder)
     Y = Kr + 1
     edge_mats: dict = {}
     parents: dict = {Y: []}
     noise: dict = {Y: (sigma_d ** 2) * _eye(scene.n_ant(dst))}
     if direct:
-        edge_mats[(Y, 0)] = scene.channel(src, dst, atten=scene.direct_atten,
-                                          k_wave=k_wave)
+        edge_mats[(Y, 0)] = apply(scene.channel(src, dst, atten=scene.direct_atten,
+                                                k_wave=k_wave))
         parents[Y].append(0)
     for i, relay in enumerate(relays, start=1):
-        H_sr = scene.channel(src, relay, k_wave=k_wave)
+        A_sr = apply(scene.channel(src, relay, k_wave=k_wave))   # precoded source->relay edge
         H_rd = scene.channel(relay, dst, k_wave=k_wave)
-        g = af_gain(H_sr, input_cov, sigma_r, P_relay)
-        edge_mats[(i, 0)] = H_sr
-        edge_mats[(Y, i)] = g * H_rd
+        if relay_mats is None:
+            g = af_gain(A_sr, input_cov, sigma_r, P_relay)       # scalar AF gain
+            edge_rd = g * H_rd
+        else:
+            edge_rd = H_rd @ relay_mats[i - 1].to(DTYPE)         # matrix relay precoder
+        edge_mats[(i, 0)] = A_sr
+        edge_mats[(Y, i)] = edge_rd
         parents[i] = [0]
         parents[Y].append(i)
         noise[i] = (sigma_r ** 2) * _eye(scene.n_ant(relay))

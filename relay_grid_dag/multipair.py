@@ -1,4 +1,4 @@
-"""Multi-pair NF-PRG: relay selection under interference, via the cmi-dag CMI.
+"""Multi-pair NRG: relay selection under interference, via the cmi-dag CMI.
 
 Several Tx/Rx pairs share the candidate relay grid. Each active relay forwards the
 *superposition* of every transmitter (shared medium), and each receiver sees its

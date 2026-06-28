@@ -1,11 +1,11 @@
-"""Run the precoded-model example suite (E1-E4) and print a PASS/FAIL summary.
+"""Run the whole NF-PRG smoke test (S1-S4) and print a PASS/FAIL summary.
 
-    uv run python examples/run_all.py
+    /Users/wadayama/Dropbox/2026-nearfield-dag/.venv/bin/python smoke/run_all.py
 """
 import importlib
 
-MODS = ["e1_precoding_gain", "e2_selection_value",
-        "e3_near_vs_far", "e4_carrier_field"]
+MODS = ["s1_position_matters", "s2_selection_value",
+        "s3_cont_to_discrete", "s4_ofdm_shared"]
 
 
 def main():

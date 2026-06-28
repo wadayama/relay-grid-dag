@@ -3,10 +3,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.12-blue.svg)](https://www.python.org/)
 
-**Near-field Programmable Relay Grid (NF-PRG):** sparse activation / selection of
+**Near-field Relay Grid (NRG):** sparse activation / selection of
 candidate relays for geometry-aware mutual-information channel shaping.
 
-Given a transmitter, a receiver, and a grid of `L` candidate relay sites, NF-PRG
+Given a transmitter, a receiver, and a grid of `L` candidate relay sites, NRG
 *activates a few* (`K ≪ L`) to actively shape the near-field channel. This library
 provides the **selection / activation layer** — candidate grids, greedy / swap /
 exhaustive / received-power / distance strategies, and the continuous-to-discrete
@@ -78,7 +78,8 @@ relay-grid-dag/
 │   ├── selection.py     K-of-L selection: greedy / swap / exhaustive / baselines
 │   │                    + continuous-to-discrete (position-gradient PGA → rounding)
 │   └── __init__.py      public API (physics re-exports + selection layer)
-├── examples/            runnable studies (S1–S4, robustness, scaling) + interactive demo
+├── examples/            runnable precoded-model studies (E1–E4) + multi-pair demo
+├── archive/             superseded isotropic code (reference only, not imported)
 ├── docs/                a five-part tutorial walkthrough
 ├── references/          background notes + key literature
 ├── tests/               regression tests (physics + selection)
@@ -102,19 +103,19 @@ relay-grid-dag/
 import relay_grid_dag as rgd
 
 scene, names, coords = rgd.build_candidate_scene("near")   # Tx, Rx, 25 candidates
-print(rgd.direct_only_mi(scene))                           # direct-only link, bits
 
-# Activate the 3 best relays by greedy MI vs the naive received-power baseline:
-g  = rgd.select_greedy_mi(scene, names, 3)
-rp = rgd.select_received_power(scene, names, 3)
-print(rgd.subset_mi(scene, [names[i] for i in g]))         # smart selection
-print(rgd.subset_mi(scene, [names[i] for i in rp]))        # naive selection
+# Optimize the Tx + relay precoders for a chosen subset (the MI f(S)):
+cap, F, W = rgd.optimize_precoders(scene, "tx", [names[6], names[18]], "rx")
+print(cap)                                                 # optimized MI, bits
 
-# Exhaustive oracle (small L) and the continuous-to-discrete pipeline:
-best, best_mi = rgd.select_exhaustive(scene, names, 2)
-final, _ = rgd.continuous_relays(2, [6.0, -4.0], [14.0, 4.0])   # position-gradient PGA
-ridx = rgd.round_to_grid(final, coords)                         # → nearest grid points
-sidx, s_mi = rgd.swap_search(scene, names, ridx, 2)             # 1-swap polish
+# Select which K relays to activate, scoring by the optimized MI f(S):
+g          = rgd.select_greedy(scene, names, 3, iters=50)        # greedy on MI
+sw, sw_cap = rgd.swap_search(scene, names, g, 3, iters=50)       # one-swap polish
+rp         = rgd.select_received_power(scene, names, 3)          # naive baseline
+
+# The conventional scalar-AF relay (no precoder optimization) is the baseline:
+print(rgd.subset_mi(scene, [names[i] for i in g]))              # scalar-AF baseline, bits
+best, best_cap = rgd.select_exhaustive(scene, names, 2, iters=50)  # exhaustive on MI (small L)
 ```
 
 For wideband (OFDM), evaluate per-subcarrier and sum:
@@ -124,7 +125,8 @@ k_waves = rgd.subcarrier_wavenumbers(f_c=10.0, S=8, df=0.4)
 sumrate = sum(rgd.subset_mi(scene, [names[i] for i in g], k_wave=k) for k in k_waves)
 ```
 
-See [`examples/`](examples/) for the runnable studies and the interactive demo.
+See [`examples/`](examples/) for the runnable studies (E1–E4), including the
+carrier-field map (`e4_carrier_field.py`).
 
 ## Public API
 
@@ -137,24 +139,31 @@ All symbols below are re-exported from the top-level `relay_grid_dag` package.
 | `grid_coords(nx=5, ny=5, xr=(6,14), yr=(-4,4))` | `(L, 2)` candidate relay centres, row-major in `(y, x)`. |
 | `build_candidate_scene(model="near", *, coords=None, n_tx=8, n_rx=8, n_relay=4, direct_atten=0.3, …)` | Scene with Tx, Rx and `L` candidate relays `c0..c{L-1}`. Returns `(scene, names, coords)`. |
 
-### Mutual information (this package)
+### Precoding engine (this package) — the MI oracle `f(S)`
 
 | Symbol | Purpose |
 | --- | --- |
-| `subset_mi(scene, subset, *, k_wave=2π, P_relay=100)` | `I(X;Y)` in bits for activating `subset` relays + direct path. `subset=[]` is direct-only. `P_relay` is the relay-vs-Tx power knob. Returns the FD value (see Conventions). |
-| `direct_only_mi(scene, *, k_wave=2π)` | MI of the direct link alone (`subset=[]`). |
+| `optimize_precoders(scene, src, subset, dst, *, iters=400, restarts=1, seed=0, P_tx=100, P_relay=100, k_wave=2π, d=None, F_init=None, W_init=None)` | Maximize the merge-channel MI over the Tx precoder `F` and relay matrices `{W_l}` by whitened complex-AD projected gradient ascent → `(mi_bits, F, W_list)`. Random-initialized; `restarts` runs a multi-start and keeps the best. |
+| `optimized_mi(scene, src, subset, dst, **kw)` | The optimized MI `f(S)` (bits) only — wrapper over `optimize_precoders`. |
 
-### Selection strategies (this package)
+### Baseline MI (this package)
 
 | Symbol | Purpose |
 | --- | --- |
-| `select_greedy_mi(scene, names, K, *, P_relay=100)` | Forward greedy: add the largest-MI-gain candidate `K` times. `O(KL)`, deterministic, near-oracle. |
-| `select_exhaustive(scene, names, K)` | Brute-force best `K`-subset → `(indices, mi)`. Small `L` only. |
-| `swap_search(scene, names, init, K)` | 1-swap local search from `init` → `(indices, mi)`. |
+| `subset_mi(scene, subset, *, k_wave=2π, P_relay=100)` | Conventional scalar-AF relay MI in bits (the baseline; no precoder optimization). `subset=[]` is direct-only. FD value (see Conventions). |
+| `direct_only_mi(scene, *, k_wave=2π)` | Scalar-AF MI of the direct link alone (`subset=[]`). |
+
+### Selection strategies (this package) — on the MI `f(S)`
+
+| Symbol | Purpose |
+| --- | --- |
+| `select_greedy(scene, names, K, *, warm_start=True, **engine_kw)` | Forward greedy on `f(S)`, warm-started. `engine_kw` (e.g. `iters`, `restarts`) is forwarded to `optimize_precoders`. |
+| `select_exhaustive(scene, names, K, **engine_kw)` | Brute-force best `K`-subset on `f(S)` → `(indices, mi)`. Small `L` (each `f(S)` is an optimization). |
+| `swap_search(scene, names, init, K, *, max_passes=8, **engine_kw)` | 1-swap local search on `f(S)` → `(indices, mi)`; polishes greedy. |
 | `select_received_power(scene, names, K)` | Top-`K` by two-hop cascade gain `‖H_rd H_tr‖²_F` (naive baseline). |
 | `select_distance(coords, K, tx, rx)` | `K` shortest two-hop path lengths (naive baseline). |
 | `received_power_scores(scene, names)` | Per-candidate received-power scores. |
-| `random_subset_stats(scene, names, K, *, trials=200, seed=0)` | mean/std/max/min MI over random `K`-subsets. |
+| `random_subset_stats(scene, names, K, *, trials=200, seed=0)` | mean/std/max/min scalar-AF MI over random `K`-subsets. |
 
 ### Continuous-to-discrete (this package)
 

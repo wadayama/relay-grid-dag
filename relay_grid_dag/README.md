@@ -1,6 +1,6 @@
 # relay_grid_dag — library source
 
-The Near-field Programmable Relay Grid (NF-PRG) **selection layer**: a fixed
+The Near-field Relay Grid (NRG) **selection layer**: a fixed
 candidate grid of `L` relays, from which a few (`K`) are activated to shape the
 near-field channel. The physics (channels, K-recursion MI) is delegated; this
 package is the discrete activation / selection logic on top.
@@ -14,8 +14,9 @@ All public symbols are re-exported from the top-level package — see the
 | --- | --- |
 | `_nearfield/` | **Vendored near-field physics** — a frozen copy of `nearfield-dag` (spherical-wave LoS channels, `Scene`, `mi`, `multirelay_merge`, OFDM, projections, `viz`). Imports rewritten to package-relative; MI still delegates to the public `gaussian-dag` K-recursion. Not modified beyond vendoring. |
 | `grid.py` | Candidate-grid geometry: `grid_coords` (row-major `(y,x)` centres) and `build_candidate_scene` (Tx + Rx + `L` candidate relay nodes). Holds the default scene constants (`N_TX`, `N_RX`, `N_RELAY`, `DIRECT_ATTEN`, `P_RELAY`, region). |
-| `selection.py` | The selection strategies: `subset_mi` / `direct_only_mi` (the single physics call), `received_power_scores` and `select_received_power` / `select_distance` (naive baselines), `select_greedy_mi`, `select_exhaustive`, `swap_search`, `random_subset_stats`, and the continuous-to-discrete pair `continuous_relays` (position-gradient PGA) + `round_to_grid`. |
-| `__init__.py` | Public API: re-exports the vendored physics and the selection layer. |
+| `precoding.py` | The differentiable joint Tx/relay precoding engine (SPEC.md Sec. 4): `optimize_precoders` (whitened complex-AD projected gradient ascent) and `optimized_mi` (the optimized-MI objective `f(S)`). |
+| `selection.py` | The unified selection layer on the optimized MI `f(S)`: `subset_mi` / `direct_only_mi` (the conventional scalar-AF relay baseline), `received_power_scores` and `select_received_power` / `select_distance` (naive baselines), `select_greedy`, `select_exhaustive`, `swap_search` (score by `f(S)`; `iters` sets the optimization depth; random-initialized multi-start via `restarts`), `random_subset_stats`, and the continuous-to-discrete pair `continuous_relays` (position-gradient PGA) + `round_to_grid`. |
+| `__init__.py` | Public API: re-exports the vendored physics, the precoding engine, and the unified selection layer. |
 
 ## Design boundary
 

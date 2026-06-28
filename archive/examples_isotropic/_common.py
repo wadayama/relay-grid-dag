@@ -16,8 +16,8 @@ import relay_grid_dag as nfd                       # whole library, exposed as C
 from relay_grid_dag import (                       # selection / grid API as C.<name>
     build_candidate_scene, grid_coords, subset_mi, direct_only_mi,
     received_power_scores, select_received_power, select_distance,
-    select_greedy, select_exhaustive, swap_search, random_subset_stats,
-    continuous_relays, round_to_grid, optimize_precoders, optimized_mi,
+    select_greedy_mi, select_exhaustive, swap_search, random_subset_stats,
+    continuous_relays, round_to_grid,
 )
 from relay_grid_dag.grid import (                  # scene-config defaults
     TX_XY, RX_XY, GRID_X, GRID_Y, GRID_NX, GRID_NY,
@@ -31,31 +31,11 @@ os.makedirs(OUT, exist_ok=True)
 # --------------------------------------------------------------------------- #
 # Matplotlib helpers.                                                          #
 # --------------------------------------------------------------------------- #
-def paper_style():
-    """Shared figure style for the paper: Helvetica, slightly larger axis labels/ticks,
-    and vector-PDF-friendly font embedding (call after matplotlib is imported)."""
-    import matplotlib
-    matplotlib.rcParams.update({
-        "font.family": "sans-serif",
-        "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
-        "font.size": 13,
-        "axes.labelsize": 15,
-        "axes.titlesize": 14,
-        "xtick.labelsize": 13,
-        "ytick.labelsize": 13,
-        "legend.fontsize": 11,
-        "axes.linewidth": 0.9,
-        "pdf.fonttype": 42,            # embed TrueType (selectable/clean text)
-        "ps.fonttype": 42,
-        "figure.dpi": 120,
-    })
-
-
 def _mpl():
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    paper_style()
+    plt.rcParams.update({"font.size": 9, "axes.titlesize": 10, "figure.dpi": 130})
     return plt
 
 

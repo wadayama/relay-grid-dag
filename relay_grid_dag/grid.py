@@ -1,4 +1,4 @@
-"""Candidate relay grid: geometry of a Near-field Programmable Relay Grid scene.
+"""Candidate relay grid: geometry of a Near-field Relay Grid scene.
 
 A scene has a transmitter, a receiver, and ``L`` candidate relay sites laid out on
 a grid; the selection layer (:mod:`relay_grid_dag.selection`) then activates a few

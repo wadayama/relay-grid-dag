@@ -1,25 +1,26 @@
-"""Interactive demo for NF-PRG (Near-field Programmable Relay Grid) *selection*.
+"""Interactive demo for the precoded Near-field Relay Grid.
 
-Companion to nearfield-dag's `interactive_relay.py` (which moves relays by
-gradient). Here the relays are FIXED candidate sites on a grid; dragging the Tx
-re-runs the selection in real time and shows *which* K candidates the smart
-(greedy-MI) rule activates versus the naive received-power rule -- the core
-NF-PRG story: a few well-chosen relays beat naive magnitude-based selection, and
-the right choice is non-obvious and geometry-dependent.
+Drag the Tx (red triangle) or Rx (cyan triangle): a few candidate relays are
+activated and the Tx / relay precoders are optimized for the shown configuration.
+The carrier-field background is rendered from those same optimized precoders, so
+the field and the reported MI describe one transmit configuration.
 
-    Scene (Tx, Rx, L candidate relays)
-      -> greedy-MI / received-power selection of K     [relay_grid_dag]
-      -> mi(multirelay_merge) per candidate subset     [gaussian-dag K-recursion]
-    Background: carrier-power field of the greedy-selected relays (relay_grid_dag.viz).
+UI mirrors the earlier selection demo (K radio, relay-power radio, drag Tx/Rx,
+Tx->relay->Rx path lines, info box, light-while-dragging / heavy-on-drop). On drop
+the relays are selected by greedy on the optimized MI f(S) and the Tx/relay
+precoders are optimized; the carrier field is rendered from those precoders. During
+a drag only the terminals move (the configuration re-solves on release).
+(The OFDM per-subcarrier inset of the earlier demo is omitted.)
 
 Controls:
-    drag Tx (red triangle)   move the transmitter
-    radio buttons (left)     number of activated relays K (1-4)
-    q                        quit
+    drag Tx (red triangle) / Rx (cyan triangle)   move the terminals
+    radio (left)   number of activated relays K (0 = direct)
+    radio (left)   relay power (dB rel. Tx)
+    q              quit
 
-Run (window):     uv run python examples/relay_grid_demo.py
-Headless check:   uv run python examples/relay_grid_demo.py --selftest
-Shareable still:  uv run python examples/relay_grid_demo.py --snapshot
+    uv run --extra examples python examples/relay_grid_demo.py            # window
+    uv run --extra examples python examples/relay_grid_demo.py --snapshot # -> out/
+    uv run --extra examples python examples/relay_grid_demo.py --selftest # headless
 """
 from __future__ import annotations
 
@@ -31,10 +32,6 @@ SELFTEST = "--selftest" in sys.argv
 SNAPSHOT = "--snapshot" in sys.argv
 if SELFTEST or SNAPSHOT:
     matplotlib.use("Agg")            # headless: identical on every platform
-# else: let matplotlib auto-select the platform's interactive GUI backend
-# (macosx / Qt / Tk), so the live window works for anyone who cloned the repo,
-# not only on macOS. The window needs a desktop GUI backend; if none is available
-# (e.g. a headless server), use --snapshot / --selftest instead.
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -55,13 +52,20 @@ N_RELAY = 4                     # antennas per candidate relay
 P_RELAY = 100.0                 # per-relay output power (Tx power = 100)
 MAX_K = 4
 HEAT_NX, HEAT_NY = 150, 110
-GREEDY_COL = "#ff2d55"          # selected (greedy-MI) relays
-F_C, S_SC, DF = 10.0, 8, 0.4    # OFDM band for the per-subcarrier rate inset
-_K_WAVES = None                 # lazily filled (needs relay_grid_dag imported)
+CMAP = "viridis"                # background carrier-field colormap
+SEL_COL = "#ff2bd6"             # activated relays / relay path lines (magenta: pops on viridis)
+DIRECT_COL = "#ffffff"          # weak direct Tx-Rx link (white dashed)
+SEL_ITERS = 5                  # greedy-selection inner-optimization depth (on drop)
+DISP_ITERS = 50                # precoder-optimization depth for the shown set
 
 _gx, _gy = np.meshgrid(np.linspace(*PLANE_X, HEAT_NX), np.linspace(*PLANE_Y, HEAT_NY))
 _GRID = torch.tensor(np.stack([_gx.ravel(), _gy.ravel()], axis=1), dtype=rgd.RDTYPE)
 _COORDS = rgd.grid_coords(GRID_NX, GRID_NY, GRID_X, GRID_Y)
+
+SPECS = (f"near-field LoS, single pair  |  Tx/Rx: {N_TX}-elem ULA, relay: {N_RELAY}-elem ULA "
+         f"(0.5λ spacing)  |  {GRID_NX}x{GRID_NY} relay grid, "
+         f"{(GRID_X[1]-GRID_X[0])/(GRID_NX-1):.1f}x{(GRID_Y[1]-GRID_Y[0])/(GRID_NY-1):.1f}λ "
+         f"(L={GRID_NX*GRID_NY})  |  P_tx=P_relay  |  direct atten {DIRECT_ATTEN}")
 
 
 def build_scene(tx_c):
@@ -76,174 +80,133 @@ def build_scene(tx_c):
     return s, names
 
 
-def selections(scene, names, K, *, wideband=True, P_relay=P_RELAY):
-    """Return (greedy_idx, recvpow_idx, dict of sum-rates) for the current
-    geometry. ``wideband`` picks the greedy criterion: the true OFDM sum-rate
-    ``sum_k I_k`` (committed on drop) or a fast single-carrier proxy (live drag).
-    Reported values are always the wideband sum-rate of the selected set.
-    ``P_relay`` is the per-relay output power (relay-vs-Tx power knob)."""
-    g_idx = (select_greedy_sumrate(scene, names, K, P_relay) if wideband
-             else rgd.select_greedy_mi(scene, names, K, P_relay=P_relay))
-    r_idx = rgd.select_received_power(scene, names, K)
-    sr = dict(
-        greedy=sum_rate(scene, names, g_idx, P_relay),
-        recv=sum_rate(scene, names, r_idx, P_relay),
-        direct=sum_rate(scene, names, [], P_relay),
-    )
-    return g_idx, r_idx, sr
+def select_set(scene, names, K, P_relay):
+    """Greedy activation of K relays on the optimized MI f(S)."""
+    if K <= 0:
+        return []
+    return rgd.select_greedy(scene, names, K, iters=SEL_ITERS, P_relay=P_relay)
 
 
-def field_image(scene, names, g_idx, P_relay=P_RELAY):
-    sel = [names[i] for i in g_idx]
-    db = viz.carrier_field(scene, "tx", "rx", _GRID, relays=sel,
-                           P_tx=P_RELAY, P_relay=P_relay)
+def optimize_set(scene, names, idx, P_relay):
+    """Optimize the Tx/relay precoders for the chosen set -> (MI, F, W)."""
+    sel = [names[i] for i in idx]
+    return rgd.optimize_precoders(scene, "tx", sel, "rx",
+                                  P_relay=P_relay, iters=DISP_ITERS)
+
+
+def field_image(scene, names, idx, F, W):
+    sel = [names[i] for i in idx]
+    db = viz.carrier_field(scene, "tx", _GRID, F=F, relays=sel, relay_mats=W)
     return db.reshape(HEAT_NY, HEAT_NX)
 
 
-def per_sc_rates(scene, names, g_idx, P_relay=P_RELAY):
-    """Per-subcarrier MI I_k of the (band-shared) selected relay set."""
-    global _K_WAVES
-    if _K_WAVES is None:
-        _K_WAVES = rgd.subcarrier_wavenumbers(F_C, S_SC, DF)
-    sel = [names[i] for i in g_idx]
-    return np.array([rgd.subset_mi(scene, sel, k_wave=kw, P_relay=P_relay)
-                     for kw in _K_WAVES])
-
-
-def sum_rate(scene, names, idx, P_relay=P_RELAY):
-    """Wideband simple sum-rate ``sum_k I_k`` (unit weights) of the selected set."""
-    return float(per_sc_rates(scene, names, idx, P_relay).sum())
-
-
-def select_greedy_sumrate(scene, names, K, P_relay=P_RELAY):
-    """Forward greedy that maximizes the wideband sum-rate ``sum_k I_k`` (the S4
-    OFDM criterion): the activation set ``a`` is shared across all subcarriers."""
-    global _K_WAVES
-    if _K_WAVES is None:
-        _K_WAVES = rgd.subcarrier_wavenumbers(F_C, S_SC, DF)
-    chosen, remaining = [], set(range(len(names)))
-    for _ in range(K):
-        best_j, best = None, -np.inf
-        for j in remaining:
-            sel = [names[i] for i in chosen + [j]]
-            val = sum(rgd.subset_mi(scene, sel, k_wave=kw, P_relay=P_relay)
-                      for kw in _K_WAVES)
-            if val > best:
-                best, best_j = val, j
-        chosen.append(best_j)
-        remaining.discard(best_j)
-    return sorted(chosen)
-
-
-def _add_sc_inset(ax, rates):
-    """Small per-subcarrier rate bar chart inset; returns (axes, bar_container)."""
-    axsc = ax.inset_axes([0.63, 0.005, 0.34, 0.20])
-    axsc.set_facecolor((0, 0, 0, 0.35))           # dark translucent so white text reads
-    bars = axsc.bar(range(1, S_SC + 1), rates, color=GREEDY_COL, width=0.82)
-    axsc.set_title(r"per-subcarrier rate $I_k$", fontsize=8, color="white")
-    axsc.set_xticks([]); axsc.tick_params(labelsize=6, colors="white")
-    axsc.set_ylim(0, float(rates.max()) * 1.25 + 1e-6)
-    for s in axsc.spines.values():
-        s.set_edgecolor("white")
-    return axsc, bars
-
-
-def _update_sc_inset(axsc, bars, rates):
-    for rect, h in zip(bars, rates):
-        rect.set_height(float(h))
-    axsc.set_ylim(0, float(rates.max()) * 1.25 + 1e-6)
-
-
-def _info(sr, K, prelay_mult=1):
-    return (f"K activated   = {K} of {len(_COORDS)}\n"
-            f"relay power   = {prelay_mult}x Tx\n"
-            f"sum-rate ΣI_k = {sr['greedy']:7.2f} bits/s/Hz ({S_SC} sc)\n"
-            f"direct only   = {sr['direct']:7.2f} bits/s/Hz\n"
-            f"relay gain    = {sr['greedy'] - sr['direct']:+7.2f} over direct")
+def _info(K, direct, *, cap=None, pmult=1):
+    n = len(_COORDS)
+    if cap is None:
+        capline = "spectral eff  =  (release to optimize)"
+        gainline = "relay gain    =  (release to optimize)"
+    else:
+        capline = f"spectral eff  = {cap:7.2f} bits/s/Hz (optimized)"
+        gainline = f"relay gain    = {cap - direct:+7.2f} over direct"
+    return (f"K activated   = {K} of {n}\n"
+            f"relay power   = +{int(round(10 * np.log10(pmult)))} dB rel. Tx\n"
+            f"{capline}\n"
+            f"direct only   = {direct:7.2f} bits/s/Hz\n"
+            f"{gainline}")
 
 
 def _draw_static(ax, *, draw_rx=True):
-    """Candidate dots (and, by default, a static Rx marker)."""
     ax.scatter(_COORDS[:, 0], _COORDS[:, 1], s=70, c="0.75", edgecolors="k",
                linewidths=0.4, zorder=3, label="candidate relays")
     if draw_rx:
         ax.plot([RX_C[0]], [RX_C[1]], "cv", ms=15, zorder=5, label="Rx")
 
 
+def _render_field(scene, names, idx, P_relay):
+    """Heavy step: optimize precoders for ``idx`` and return (cap, field_image)."""
+    if idx:
+        cap, F, W = optimize_set(scene, names, idx, P_relay)
+        return cap, field_image(scene, names, idx, F, W)
+    cap, F, W = rgd.optimize_precoders(scene, "tx", [], "rx",
+                                       P_relay=P_relay, iters=DISP_ITERS)
+    return cap, field_image(scene, names, [], F, W)
+
+
 # --------------------------------- self-test ---------------------------------
 def selftest():
-    print("selftest: NF-PRG selection demo over a few Tx positions ...")
+    print("selftest: precoded relay-grid demo over a few Tx positions ...")
     txs = [(0.0, 0.0), (0.0, 6.0), (-3.0, -4.0)]
     fig, axes = plt.subplots(1, len(txs), figsize=(5.0 * len(txs), 4.4))
     K = 3
-    wins = 0
     for ax, tx in zip(axes, txs):
         s, names = build_scene(tx)
-        g_idx, r_idx, mi = selections(s, names, K)
-        assert np.isfinite(mi["greedy"]) and mi["greedy"] > 0
-        assert mi["greedy"] >= mi["recv"] - 1e-6, "greedy below received-power"
-        wins += mi["greedy"] > mi["recv"] + 1e-6
-        ax.imshow(field_image(s, names, g_idx), origin="lower",
-                  extent=[*PLANE_X, *PLANE_Y], aspect="auto", cmap="inferno",
-                  vmin=-40, vmax=0, zorder=0)
+        idx = select_set(s, names, K, P_RELAY)
+        direct = rgd.direct_only_mi(s, P_relay=P_RELAY)
+        cap, fld = _render_field(s, names, idx, P_RELAY)
+        assert np.isfinite(cap) and cap >= direct - 1e-6
+        ax.imshow(fld, origin="lower", extent=[*PLANE_X, *PLANE_Y], aspect="auto",
+                  cmap=CMAP, vmin=-40, vmax=0, zorder=0)
         _draw_static(ax)
-        ax.scatter(_COORDS[g_idx, 0], _COORDS[g_idx, 1], s=240, facecolors="none",
-                   edgecolors=GREEDY_COL, linewidths=2.6, zorder=7)
+        ax.plot([tx[0], RX_C[0]], [tx[1], RX_C[1]], color=DIRECT_COL, lw=1.1,
+                ls="--", alpha=0.9, zorder=6)
+        for i in idx:
+            ax.plot([tx[0], _COORDS[i, 0], RX_C[0]], [tx[1], _COORDS[i, 1], RX_C[1]],
+                    color=SEL_COL, lw=1.4, alpha=0.9, zorder=6)
+        ax.scatter(_COORDS[idx, 0], _COORDS[idx, 1], s=240, facecolors="none",
+                   edgecolors=SEL_COL, linewidths=2.6, zorder=7)
         ax.plot([tx[0]], [tx[1]], "r^", ms=14, zorder=8)
         ax.set_xlim(*PLANE_X); ax.set_ylim(*PLANE_Y)
-        ax.set_title(f"Tx={tx}: greedy MI {mi['greedy']:.1f} (direct {mi['direct']:.1f})")
-        print(f"  Tx={tx}: greedy={mi['greedy']:.2f} recv={mi['recv']:.2f} "
-              f"direct={mi['direct']:.2f}  greedy_set={g_idx} recv_set={r_idx}")
+        ax.set_title(f"Tx={tx}: cap {cap:.1f} (direct {direct:.1f})")
+        print(f"  Tx={tx}: cap={cap:.2f} direct={direct:.2f} set={idx}")
     out = os.path.join(os.path.dirname(__file__), "out")
     os.makedirs(out, exist_ok=True)
     fig.tight_layout()
     fig.savefig(os.path.join(out, "relay_grid_demo_selftest.png"), dpi=110)
-    print(f"  greedy strictly beat received-power in {wins}/{len(txs)} positions")
     print(f"  saved {out}/relay_grid_demo_selftest.png\nselftest passed.")
 
 
 # --------------------------------- snapshot ----------------------------------
 def snapshot():
-    """A shareable still: off-axis Tx where smart vs naive selection visibly differ."""
     from matplotlib.widgets import RadioButtons
     K = 3
     tx = np.array([-2.0, 5.0])
     s, names = build_scene(tx)
-    g_idx, r_idx, mi = selections(s, names, K)
+    idx = select_set(s, names, K, P_RELAY)
+    direct = rgd.direct_only_mi(s, P_relay=P_RELAY)
+    cap, fld = _render_field(s, names, idx, P_RELAY)
 
     fig, ax = plt.subplots(figsize=(10.5, 7.4))
     plt.subplots_adjust(left=0.16)
     ax.set_xlim(*PLANE_X); ax.set_ylim(*PLANE_Y)
     ax.set_xlabel(r"x [$\lambda$]"); ax.set_ylabel(r"y [$\lambda$]")
-    im = ax.imshow(field_image(s, names, g_idx), origin="lower",
-                   extent=[*PLANE_X, *PLANE_Y], aspect="auto", cmap="inferno",
-                   vmin=-40, vmax=0, zorder=0)
+    im = ax.imshow(fld, origin="lower", extent=[*PLANE_X, *PLANE_Y], aspect="auto",
+                   cmap=CMAP, vmin=-40, vmax=0, zorder=0)
     cb = fig.colorbar(im, ax=ax, fraction=0.046)
-    cb.set_label("carrier power [dB] (Tx + greedy-selected relays)")
+    cb.set_label("carrier field [dB] (optimized Tx + relay precoders)")
     _draw_static(ax)
-    for i in g_idx:
+    ax.plot([tx[0], RX_C[0]], [tx[1], RX_C[1]], color=DIRECT_COL, lw=1.4,
+            ls="--", alpha=0.9, zorder=4, label="direct link (weak)")
+    for i in idx:
         ax.plot([tx[0], _COORDS[i, 0], RX_C[0]], [tx[1], _COORDS[i, 1], RX_C[1]],
-                color=GREEDY_COL, lw=1.3, alpha=0.8, zorder=4)
-    ax.scatter(_COORDS[g_idx, 0], _COORDS[g_idx, 1], s=300, facecolors="none",
-               edgecolors=GREEDY_COL, linewidths=2.8, zorder=7,
-               label="greedy-MI selected relays")
+                color=SEL_COL, lw=1.6, alpha=0.9, zorder=4)
+    ax.scatter(_COORDS[idx, 0], _COORDS[idx, 1], s=300, facecolors="none",
+               edgecolors=SEL_COL, linewidths=2.8, zorder=7, label="activated relays")
     ax.plot([tx[0]], [tx[1]], "r^", ms=16, zorder=8, label="Tx (drag me)")
-    ax.text(0.02, 0.98, _info(mi, K), transform=ax.transAxes, va="top",
-            fontsize=10, family="monospace",
+    ax.text(0.02, 0.98, _info(K, direct, cap=cap), transform=ax.transAxes,
+            va="top", fontsize=10, family="monospace",
             bbox=dict(boxstyle="round", fc="white", alpha=0.85))
-    _add_sc_inset(ax, per_sc_rates(s, names, g_idx))
     ax.legend(loc="upper right", fontsize=9)
-    ax.set_title("NF-PRG: drag the Tx — a few relays are *selected* from the grid "
+    ax.set_title("NRG: drag the Tx — relays are activated and precoders optimized "
                  "to shape the near-field channel")
+    fig.text(0.5, 0.012, SPECS, ha="center", va="bottom", fontsize=8, color="0.35")
     ax_radio = fig.add_axes([0.015, 0.46, 0.10, 0.32])
     ax_radio.set_title("K (0 = direct)", fontsize=9)
     RadioButtons(ax_radio, [str(k) for k in range(0, MAX_K + 1)], active=K)
-
     out = os.path.join(os.path.dirname(__file__), "out")
     os.makedirs(out, exist_ok=True)
     path = os.path.join(out, "relay_grid_demo.png")
     fig.savefig(path, dpi=120, bbox_inches="tight")
-    print(f"saved {path}  (K={K}, greedy={mi['greedy']:.2f}, recv={mi['recv']:.2f})")
+    print(f"saved {path}  (K={K}, SE={cap:.2f})")
 
 
 # -------------------------------- interactive --------------------------------
@@ -252,7 +215,7 @@ def interactive():
 
     st = {"tx": np.array([0.0, 0.0]), "rx": np.array(RX_C, dtype=float),
           "drag": None, "K": 3, "pmult": 1}
-    P = lambda: st["pmult"] * P_RELAY     # current per-relay output power
+    P = lambda: st["pmult"] * P_RELAY
     s, names = build_scene(st["tx"])
 
     matplotlib.rcParams["toolbar"] = "None"      # no pan/zoom rubber-band on drag
@@ -261,59 +224,71 @@ def interactive():
     ax.set_xlim(*PLANE_X); ax.set_ylim(*PLANE_Y)
     ax.set_xlabel(r"x [$\lambda$]"); ax.set_ylabel(r"y [$\lambda$]")
 
-    g_idx, r_idx, mi = selections(s, names, st["K"], P_relay=P())
-    im = ax.imshow(field_image(s, names, g_idx, P()), origin="lower",
-                   extent=[*PLANE_X, *PLANE_Y], aspect="auto", cmap="inferno",
-                   vmin=-40, vmax=0, zorder=0)
+    idx = select_set(s, names, st["K"], P())
+    st["idx"] = idx
+    direct = rgd.direct_only_mi(s, P_relay=P())
+    cap, fld = _render_field(s, names, idx, P())
+    im = ax.imshow(fld, origin="lower", extent=[*PLANE_X, *PLANE_Y], aspect="auto",
+                   cmap=CMAP, vmin=-40, vmax=0, zorder=0)
     cb = fig.colorbar(im, ax=ax, fraction=0.046)
-    cb.set_label("carrier power [dB] (Tx + greedy-selected relays)")
+    cb.set_label("carrier field [dB] (optimized Tx + relay precoders)")
     _draw_static(ax, draw_rx=False)
-    greedy_sc = ax.scatter(_COORDS[g_idx, 0], _COORDS[g_idx, 1], s=300,
-                           facecolors="none", edgecolors=GREEDY_COL, linewidths=2.8,
-                           zorder=7, label="greedy-MI selected relays")
-    path_lns = [ax.plot([], [], color=GREEDY_COL, lw=1.2, alpha=0.8, zorder=4)[0]
+    sel_sc = ax.scatter(_COORDS[idx, 0], _COORDS[idx, 1], s=300, facecolors="none",
+                        edgecolors=SEL_COL, linewidths=2.8, zorder=7,
+                        label="activated relays")
+    path_lns = [ax.plot([], [], color=SEL_COL, lw=1.6, alpha=0.9, zorder=4)[0]
                 for _ in range(MAX_K)]
+    direct_ln, = ax.plot([st["tx"][0], st["rx"][0]], [st["tx"][1], st["rx"][1]],
+                         color=DIRECT_COL, lw=1.4, ls="--", alpha=0.9, zorder=4,
+                         label="direct link (weak)")
     tx_mk, = ax.plot([st["tx"][0]], [st["tx"][1]], "r^", ms=16, zorder=8,
                      label="Tx (drag me)")
     rx_mk, = ax.plot([st["rx"][0]], [st["rx"][1]], "cv", ms=16, zorder=8,
                      label="Rx (drag me)")
-    txt = ax.text(0.02, 0.98, _info(mi, st["K"], st["pmult"]), transform=ax.transAxes,
-                  va="top", fontsize=10, family="monospace",
+    txt = ax.text(0.02, 0.98, _info(st["K"], direct, cap=cap, pmult=st["pmult"]),
+                  transform=ax.transAxes, va="top", fontsize=10, family="monospace",
                   bbox=dict(boxstyle="round", fc="white", alpha=0.85))
-    axsc, sc_bars = _add_sc_inset(ax, per_sc_rates(s, names, g_idx, P()))
     ax.legend(loc="upper right", fontsize=9)
-    ax.set_title("NF-PRG: drag Tx or Rx — relays are selected from the grid")
+    ax.set_title("NRG: drag Tx or Rx — relays selected on MI, precoders optimized")
+    fig.text(0.5, 0.012, SPECS, ha="center", va="bottom", fontsize=8, color="0.35")
 
     ax_radio = fig.add_axes([0.015, 0.52, 0.10, 0.30])
     ax_radio.set_title("K (0 = direct)", fontsize=9)
     radio = RadioButtons(ax_radio, [str(k) for k in range(0, MAX_K + 1)], active=st["K"])
 
     PMULTS = [1, 10, 100]
-    plabels = [f"{m}x" for m in PMULTS]
+    plabels = [f"+{int(round(10 * np.log10(m)))} dB" for m in PMULTS]
     ax_pwr = fig.add_axes([0.015, 0.16, 0.10, 0.24])
-    ax_pwr.set_title("relay power\n(x Tx)", fontsize=9)
+    ax_pwr.set_title("relay power\n(dB rel. Tx)", fontsize=9)
     radio_p = RadioButtons(ax_pwr, plabels, active=PMULTS.index(st["pmult"]))
 
     def recompute(heavy):
-        """Light path (markers/selection/text) always; heavy path (per-subcarrier
-        inset + carrier field) only on drop -- keeps dragging cheap and avoids the
-        full-canvas churn that produced redraw artifacts."""
+        """Light path (move terminals; keep the current selection) while dragging;
+        heavy path (re-select on MI + optimize precoders + carrier field) only
+        on drop / radio change -- so selection and field are always on the optimized
+        MI, and dragging stays cheap."""
         s.move("tx", list(st["tx"])); s.move("rx", list(st["rx"]))
-        g_idx, r_idx, mi = selections(s, names, st["K"], wideband=heavy, P_relay=P())
-        greedy_sc.set_offsets(_COORDS[g_idx].reshape(-1, 2))
+        if heavy:
+            st["idx"] = select_set(s, names, st["K"], P())
+        idx = st["idx"]
+        direct = rgd.direct_only_mi(s, P_relay=P())
+        sel_sc.set_offsets(_COORDS[idx].reshape(-1, 2) if idx else np.empty((0, 2)))
         for k, ln in enumerate(path_lns):
-            if k < len(g_idx):
-                i = g_idx[k]
+            if k < len(idx):
+                i = idx[k]
                 ln.set_data([st["tx"][0], _COORDS[i, 0], st["rx"][0]],
                             [st["tx"][1], _COORDS[i, 1], st["rx"][1]])
             else:
                 ln.set_data([], [])
         tx_mk.set_data([st["tx"][0]], [st["tx"][1]])
         rx_mk.set_data([st["rx"][0]], [st["rx"][1]])
-        txt.set_text(_info(mi, st["K"], st["pmult"]))
+        direct_ln.set_data([st["tx"][0], st["rx"][0]], [st["tx"][1], st["rx"][1]])
         if heavy:
-            _update_sc_inset(axsc, sc_bars, per_sc_rates(s, names, g_idx, P()))
-            im.set_data(field_image(s, names, g_idx, P()))
+            cap, fld = _render_field(s, names, idx, P())
+            im.set_data(fld)
+            txt.set_text(_info(st["K"], direct, cap=cap, pmult=st["pmult"]))
+        else:
+            txt.set_text(_info(st["K"], direct, cap=None, pmult=st["pmult"]))
         fig.canvas.draw_idle()
 
     def _near(e, key):
@@ -330,12 +305,12 @@ def interactive():
         if st["drag"] and e.inaxes is ax and e.xdata is not None:
             st[st["drag"]] = np.array([np.clip(e.xdata, *PLANE_X),
                                        np.clip(e.ydata, *PLANE_Y)])
-            recompute(heavy=False)               # cheap during drag
+            recompute(heavy=False)
 
     def on_release(e):
         if st["drag"]:
             st["drag"] = None
-            recompute(heavy=True)                # inset + heatmap on drop
+            recompute(heavy=True)
 
     def on_key(e):
         if e.key == "q":

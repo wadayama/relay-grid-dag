@@ -1,43 +1,40 @@
 # examples
 
-Runnable NF-PRG studies and the interactive demo, ported from the original smoke
-test. They build on the public `relay_grid_dag` API; `_common.py` is the
-examples-layer shim (re-exports the library + matplotlib helpers + an `out/` dir).
+Runnable studies of the **precoded** model: the differentiable joint Tx/relay
+precoding engine (SPEC.md Sec. 4) and the selection layer on the optimized
+MI `f(S)` (Sec. 5). They build on the public `relay_grid_dag` API;
+`_common.py` is the examples-layer shim (re-exports the library + matplotlib
+helpers + an `out/` dir).
 
 ```bash
 uv sync --extra examples
 uv run python examples/<script>.py        # figures -> examples/out/
+uv run python examples/run_all.py         # run E1-E4, PASS/FAIL summary (~20 s)
 ```
 
 ## Studies (figure + PASS/FAIL printout)
 
 | Script | Question |
 | --- | --- |
-| `s1_position_matters.py` | Does relay position modulate MI? (near vs far) |
-| `s2_selection_value.py` | MI-aware selection vs received-power / random |
-| `s3_cont_to_discrete.py` | continuous PGA → grid rounding → 1-swap ≈ oracle |
-| `s4_ofdm_shared.py` | OFDM shared-activation (beam-squint) cost |
-| `s2b_robustness.py` | is the selection value systematic? (60 random configs) |
-| `s3b_scaling.py` | scaling L=25→400: greedy cheap & near-optimal |
-| `multipair_interference.py` | 2 interfering pairs: interference-aware selection (cmi-dag CMI) |
-| `run_all.py` | run S1–S4 and print a PASS/FAIL summary |
+| `e1_precoding_gain.py` | How much does optimizing the Tx/relay precoders raise the MI over the scalar-AF baseline? |
+| `e2_selection_value.py` | Selection on `f(S)`: greedy ≈ oracle (swap polish recovers it), both beat received-power (small grid so the oracle is feasible) |
+| `e3_near_vs_far.py` | Why near-field: direct-channel rank and optimized MI, near vs far |
+| `e4_carrier_field.py` | The carrier-field map, computed from the *same* optimized precoders as the MI (field intensity at Rx = received signal power) |
+| `multipair_interference.py` | 2 interfering pairs: interference-aware selection (cmi-dag CMI) — the separate multi-pair layer (future direction) |
+| `run_all.py` | run E1–E4 and print a PASS/FAIL summary |
 
-## Interactive demo
+## Notes
 
-`relay_grid_demo.py` — drag Tx or Rx; greedy selection of K relays updates in real
-time over the candidate grid, with a near-field carrier-field background and a
-per-subcarrier rate inset (wideband sum-rate selection).
-
-```bash
-uv run python examples/relay_grid_demo.py            # live window (drag, K buttons, q to quit)
-uv run python examples/relay_grid_demo.py --snapshot # shareable still -> out/relay_grid_demo.png
-uv run python examples/relay_grid_demo.py --selftest # headless check
-```
-
-The live window uses matplotlib's default interactive backend for your platform
-(macosx / Qt / Tk), so it works cross-platform on any desktop with a GUI toolkit.
-On a headless machine (no display), use `--snapshot` / `--selftest`, which render
-with the Agg backend and work everywhere.
-
-Note: MI / SE is reported as the idealized full-duplex value `SE (bits/s/Hz, FD)`;
-a half-duplex realisation (sum-combining receiver) achieves `SE_HD = (1/2) SE_FD`.
+- **One model, `iters` knob.** The selectors score by the optimized MI
+  `f(S)`; `iters` sets the precoder-optimization depth (random-initialized). The scalar-AF
+  / isotropic baseline (`subset_mi`). Each `f(S)` is an inner optimization, so the
+  exhaustive oracle is only run on small grids (E2 uses 6 candidates).
+- **Carrier-field visualization.** `viz.carrier_field` takes the optimized
+  `(F, {W_l})` and renders the radiated field from those precoders (SPEC.md
+  Sec. 6), so the field and the reported MI describe one transmit
+  configuration; the field intensity at the Rx array equals the model received
+  signal power. E4 produces the field-map figure.
+- **Duplexing.** MI / SE is the idealized full-duplex value `SE_FD = I(X;Y)`; a
+  half-duplex realisation achieves `SE_HD = (1/2) SE_FD`.
+- **Archived.** The earlier isotropic studies (`s1`–`s4`, `s2b`, `s3b`) and an
+  earlier interactive demo are in `../archive/examples_isotropic/`.

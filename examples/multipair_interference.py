@@ -1,4 +1,4 @@
-"""Multi-pair NF-PRG: relay selection under interference (via cmi-dag).
+"""Multi-pair NRG: relay selection under interference (via cmi-dag).
 
 Two Tx/Rx pairs share the candidate relay grid. Each active relay forwards both
 transmitters (shared medium), so it is double-edged -- it can boost the desired
@@ -77,12 +77,12 @@ def main():
                   f"(relay-borne {relay_borne:.1f})")
     axR.grid(True, axis="y", lw=0.3, alpha=0.5)
 
-    fig.suptitle("Multi-pair NF-PRG: interference-aware selection (cmi-dag CMI)",
+    fig.suptitle("Multi-pair NRG: interference-aware selection (cmi-dag CMI)",
                  fontsize=11)
     path = f"{OUT}/multipair_interference.png"
     fig.savefig(path, bbox_inches="tight")
 
-    print("=== multi-pair NF-PRG: interference-aware selection ===")
+    print("=== multi-pair NRG: interference-aware selection ===")
     print(f"M={M} pairs, L={len(names)} candidates, K={K}")
     print(f"greedy {g_idx}: per-pair TIN {[round(x,2) for x in rates_g['tin']]}, "
           f"free {[round(x,2) for x in rates_g['free']]}")

@@ -1,4 +1,4 @@
-"""relay-grid-dag: Near-field Programmable Relay Grid.
+"""relay-grid-dag: Near-field Relay Grid.
 
 Sparse activation / selection of candidate relays for geometry-aware mutual-
 information channel shaping. The near-field physics (spherical-wave LoS channels +
@@ -13,11 +13,13 @@ Physics (re-exported from the vendored engine):
     ``near_field_channel``, ``far_field_channel``, ``subcarrier_wavenumbers``,
     ``subcarrier_frequencies``, ``wideband_mi``, ``project_box``,
     ``project_min_separation``, ``viz``.
-Grid + selection (this package):
-    ``grid_coords``, ``build_candidate_scene``, ``subset_mi``, ``direct_only_mi``,
-    ``select_greedy_mi``, ``select_exhaustive``, ``select_received_power``,
-    ``select_distance``, ``swap_search``, ``random_subset_stats``,
-    ``continuous_relays``, ``round_to_grid``, ``received_power_scores``.
+Grid + precoding + selection (this package):
+    ``grid_coords``, ``build_candidate_scene``, ``optimize_precoders``,
+    ``optimized_mi``, ``subset_mi``, ``direct_only_mi``, ``select_greedy``,
+    ``select_exhaustive``, ``swap_search``, ``select_received_power``,
+    ``select_distance``, ``random_subset_stats``, ``continuous_relays``,
+    ``round_to_grid``, ``received_power_scores``. The selectors score by the
+    optimized MI ``f(S)``; ``subset_mi`` is the conventional scalar-AF baseline.
 """
 from __future__ import annotations
 
@@ -34,10 +36,13 @@ from ._nearfield import viz  # matplotlib-tier diagnostics (carrier_field, etc.)
 
 # --- selection / activation layer (this package) ---------------------------- #
 from .grid import grid_coords, build_candidate_scene
+# --- differentiable joint Tx/relay precoding engine (SPEC.md Sec. 4) -------- #
+from .precoding import optimize_precoders, optimized_mi
+# --- unified selection layer on the optimized MI (SPEC.md Sec. 5) ------ #
 from .selection import (
     subset_mi, direct_only_mi, received_power_scores,
-    select_received_power, select_distance, select_greedy_mi,
-    select_exhaustive, swap_search, random_subset_stats,
+    select_received_power, select_distance,
+    select_greedy, select_exhaustive, swap_search, random_subset_stats,
     continuous_relays, round_to_grid,
 )
 
@@ -46,6 +51,8 @@ from .multipair import (
     build_pair_scene, pair_rates, weighted_sum_rate, min_rate,
     select_greedy_sumrate, select_exhaustive_sumrate, received_power_pairs,
 )
+# --- multi-pair precoded engine (optimize {F_u},{W_l} for the TIN objective) -- #
+from .multipair_precoding import optimize_multipair, multipair_tin
 
 __version__ = "0.1.0"
 
@@ -57,13 +64,18 @@ __all__ = [
     "af_gain", "physical_channel", "waterfilling_capacity",
     "project_box", "project_min_separation", "repulsion_penalty",
     "ula", "movable", "ArrayGeometry", "DTYPE", "RDTYPE", "K_WAVE", "viz",
-    # grid + selection (this package)
+    # grid (this package)
     "grid_coords", "build_candidate_scene",
+    # differentiable joint Tx/relay precoding engine
+    "optimize_precoders", "optimized_mi",
+    # unified selection layer on the optimized MI f(S)
     "subset_mi", "direct_only_mi", "received_power_scores",
-    "select_received_power", "select_distance", "select_greedy_mi",
-    "select_exhaustive", "swap_search", "random_subset_stats",
+    "select_received_power", "select_distance",
+    "select_greedy", "select_exhaustive", "swap_search", "random_subset_stats",
     "continuous_relays", "round_to_grid",
     # multi-pair interference (this package, via cmi-dag)
     "build_pair_scene", "pair_rates", "weighted_sum_rate", "min_rate",
     "select_greedy_sumrate", "select_exhaustive_sumrate", "received_power_pairs",
+    # multi-pair precoded engine (matrix relays for interference management)
+    "optimize_multipair", "multipair_tin",
 ]

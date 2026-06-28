@@ -3,8 +3,9 @@
 These return plain numpy/tensor quantities so the library carries no plotting
 dependency; the example scripts (which require the ``examples`` extra) do the
 matplotlib rendering. The three quantities expose *why* mutual information moves
-as geometry changes: the carrier field (where energy goes in space), the received
-power, and the effective rank of the effective channel.
+as geometry changes: the carrier field (where energy goes in space, computed from
+the supplied Tx/relay precoders -- the same ones that produce the MI), the
+received power, and the effective rank of the effective channel.
 """
 from __future__ import annotations
 
@@ -30,32 +31,42 @@ def effrank(H: torch.Tensor) -> float:
     return float(e.sum() ** 2 / e.pow(2).sum())
 
 
-def carrier_field(scene, src, dst, grid, *, relays=(), P_tx=100.0,
-                  P_relay=100.0, sigma_r=1.0, floor_db=-40.0) -> np.ndarray:
-    """Total carrier field |E| in dB at the points ``grid`` (shape ``(n_pix, D)``).
+def field_intensity(scene, src, grid, *, F, relays=(), relay_mats=None) -> torch.Tensor:
+    """Expected signal intensity ``||g(p)||^2`` at each probe point ``p`` for the
+    given precoders, with the source streams ``X ~ CN(0, I)``:
 
-    The source array is conjugate-beamformed at the ``dst`` centroid (matched to
-    the direct LoS channel, power ``P_tx``); each relay re-radiates the carrier it
-    receives, amplified by a scalar AF gain normalised to ``P_relay``:
+        g(p) = atten * h(p, src) F  +  sum_l h(p, relay_l) W_l H_sr,l F,
 
-        E(p) = h(p, src) w  +  sum_i h(p, relay_i) (g_i H_sr_i w).
-
-    Returned in dB normalised to the peak (0 dB), floored at ``floor_db``. Uses
-    the scene's ``r_ref``/``r_min``. (Near-field model.)
+    where ``atten = scene.direct_atten`` is the same blockage factor the MI puts on
+    the direct Tx->Rx link, and ``W_l = relay_mats[l]`` are the physical relay
+    matrices. The field is built from the supplied precoders ``(F, {W_l})`` and the
+    scene channels --- the same quantities that produce the mutual information ---
+    so the field and the MI describe one transmit configuration (SPEC.md Sec. 6).
+    Evaluated at the Rx array, ``sum_pixels`` of this equals ``tr(G_eff G_eff^H)``
+    (the model received signal power); the tie-point test T1 checks this. Returns a
+    linear-power tensor of shape ``(n_pix,)`` (uses ``r_ref``/``r_min``; near-field).
     """
     rr, rm = scene.r_ref, scene.r_min
     with torch.no_grad():
         tx = scene.positions(src)
-        dst_c = scene.positions(dst).mean(dim=0, keepdim=True)
-        w = torch.conj(near_field_channel(dst_c, tx, r_ref=rr, r_min=rm)[0])
-        w = w * torch.sqrt(torch.tensor(P_tx, dtype=torch.float64)
-                           / (w.abs() ** 2).sum()).to(DTYPE)
-        E = near_field_channel(grid, tx, r_ref=rr, r_min=rm) @ w
-        for relay in relays:
+        G = scene.direct_atten * (near_field_channel(grid, tx, r_ref=rr, r_min=rm) @ F)
+        for i, relay in enumerate(relays):
             rly = scene.positions(relay)
-            recv = near_field_channel(rly, tx, r_ref=rr, r_min=rm) @ w
-            g = torch.sqrt(P_relay / (recv.abs() ** 2).sum().clamp(min=1e-12))
-            E = E + near_field_channel(grid, rly, r_ref=rr, r_min=rm) @ (g * recv)
-        A = E.abs().numpy()
-        db = 20.0 * np.log10(A / A.max() + 1e-12)
-        return np.clip(db, floor_db, 0.0)
+            H_sr = near_field_channel(rly, tx, r_ref=rr, r_min=rm)
+            H_gp = near_field_channel(grid, rly, r_ref=rr, r_min=rm)
+            W = relay_mats[i].to(DTYPE)
+            G = G + H_gp @ (W @ (H_sr @ F))
+        return (G.abs() ** 2).sum(dim=1)
+
+
+def carrier_field(scene, src, grid, *, F, relays=(), relay_mats=None,
+                  floor_db=-40.0) -> np.ndarray:
+    """Carrier signal field in dB at the points ``grid`` (shape ``(n_pix, D)``),
+    computed from the supplied precoders ``(F, {W_l})`` via :func:`field_intensity`
+    (the same precoders that produce the reported MI; SPEC.md Sec. 6), normalised to
+    its peak (0 dB) and floored at ``floor_db``. The field focuses energy toward the
+    destination to the extent that the supplied ``(F, {W_l})`` do."""
+    inten = field_intensity(scene, src, grid, F=F, relays=relays,
+                            relay_mats=relay_mats).numpy()
+    db = 10.0 * np.log10(inten / inten.max() + 1e-12)
+    return np.clip(db, floor_db, 0.0)

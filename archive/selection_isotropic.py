@@ -1,16 +1,12 @@
-"""Relay-selection layer: activate K of L candidate relays to maximise the spectral efficiency.
+"""Relay-selection layer: activate K of L candidate relays to maximise MI.
 
-One model, one selection family. The objective is the optimized MI
-``f(S)`` --- the merge-channel MI maximized over the Tx and relay precoders
-(:func:`relay_grid_dag.precoding.optimize_precoders`, random-initialized
-multi-start); the selectors here choose *which* relays to activate. The
-conventional scalar-AF relay (``subset_mi``) is the engine-independent baseline
-against which the precoding gain is measured.
+These are plain combinatorics on top of ``mi(multirelay_merge(...))`` from the
+vendored near-field engine -- the part that distinguishes NF-PRG from a movable
+relay: a fixed candidate grid, from which a few sites are activated. Strategies:
+received-power / distance baselines, forward greedy, exhaustive oracle, 1-swap
+local search, and the continuous-position PGA used by continuous-to-discrete.
 
-Strategies: scalar-AF baseline MI (``subset_mi``), received-power / distance
-baselines, forward greedy (warm-started), exhaustive oracle, 1-swap local search,
-and the continuous-position PGA used by continuous-to-discrete. All MI
-values are in bits/s/Hz.
+All MI values are in bits/s/Hz (the engine's ``mi`` returns bits by default).
 """
 from __future__ import annotations
 
@@ -22,24 +18,21 @@ import torch
 from . import _nearfield as nfd
 from ._nearfield.channel import K_WAVE
 from .grid import N_RELAY, P_RELAY, TX_XY, RX_XY, N_TX, N_RX, DIRECT_ATTEN
-from .precoding import optimize_precoders
 
 __all__ = [
     "subset_mi", "direct_only_mi", "received_power_scores",
-    "select_received_power", "select_distance",
-    "select_greedy", "select_exhaustive", "swap_search",
-    "random_subset_stats", "continuous_relays", "round_to_grid",
+    "select_received_power", "select_distance", "select_greedy_mi",
+    "select_exhaustive", "swap_search", "random_subset_stats",
+    "continuous_relays", "round_to_grid",
 ]
 
 
 # --------------------------------------------------------------------------- #
-# Scalar-AF baseline MI (the conventional relay; computed directly, the bound).  #
+# MI of a chosen subset (the single physics call the rest is built on).        #
 # --------------------------------------------------------------------------- #
 def subset_mi(scene, subset, *, k_wave: float = K_WAVE, P_relay: float = P_RELAY) -> float:
-    """Scalar-AF baseline MI in bits for the diamond formed by activating
-    ``subset`` relays plus the (attenuated) direct path. This is the conventional
-    amplify-and-forward relay (a power-normalized scalar gain, no precoder
-    optimization). ``subset=[]`` is the direct link."""
+    """I(X;Y) in bits for the diamond formed by activating ``subset`` relays plus
+    the (attenuated) direct path. ``subset=[]`` is the direct-only link."""
     with torch.no_grad():
         spec = nfd.multirelay_merge(scene, "tx", list(subset), "rx",
                                     P_relay=P_relay, k_wave=k_wave)
@@ -51,7 +44,7 @@ def direct_only_mi(scene, *, k_wave: float = K_WAVE, P_relay: float = P_RELAY) -
 
 
 # --------------------------------------------------------------------------- #
-# Naive baselines (model-agnostic; no inner optimization during selection).    #
+# Selection strategies.                                                        #
 # --------------------------------------------------------------------------- #
 def received_power_scores(scene, names) -> np.ndarray:
     """Per-candidate two-hop cascade gain ``||H_rd @ H_tr||_F^2`` -- the naive
@@ -82,57 +75,42 @@ def select_distance(coords, K: int, tx=TX_XY, rx=RX_XY) -> list[int]:
     return sorted(np.argsort(d)[:K].tolist())
 
 
-# --------------------------------------------------------------------------- #
-# The selection family on the optimized MI f(S) (one model; iters knob).  #
-# --------------------------------------------------------------------------- #
-def select_greedy(scene, names, K: int, *, warm_start: bool = True, **engine_kw) -> list[int]:
-    """Forward greedy on the optimized MI ``f(S)``: repeatedly add the
-    candidate with the largest MI gain. ``O(K*L)`` inner optimizations.
-
-    ``engine_kw`` is forwarded to :func:`optimize_precoders` (``iters``, ``P_tx``,
-    ``P_relay``, ``k_wave``, ``restarts``, ...). With ``warm_start`` (default), each
-    candidate is seeded from the current active set's optimum (the new relay random)."""
+def select_greedy_mi(scene, names, K: int, *, k_wave: float = K_WAVE,
+                     P_relay: float = P_RELAY) -> list[int]:
+    """Forward greedy: repeatedly add the candidate with the largest MI gain.
+    O(K*L) MI evaluations; deterministic; near-oracle in practice."""
     chosen: list[int] = []
     remaining = set(range(len(names)))
-    F_star, W_star = None, []
     for _ in range(K):
-        best = None  # (cap, j, F, Ws)
+        best_j, best_mi = None, -np.inf
         for j in remaining:
-            subset = [names[i] for i in chosen + [j]]
-            if warm_start and F_star is not None:
-                cap, F, Ws = optimize_precoders(scene, "tx", subset, "rx",
-                                                F_init=F_star, W_init=W_star + [None],
-                                                **engine_kw)
-            else:
-                cap, F, Ws = optimize_precoders(scene, "tx", subset, "rx", **engine_kw)
-            if best is None or cap > best[0]:
-                best = (cap, j, F, Ws)
-        chosen.append(best[1])
-        remaining.discard(best[1])
-        F_star, W_star = best[2], best[3]
+            mi = subset_mi(scene, [names[i] for i in chosen + [j]], k_wave=k_wave,
+                           P_relay=P_relay)
+            if mi > best_mi:
+                best_mi, best_j = mi, j
+        chosen.append(best_j)
+        remaining.discard(best_j)
     return sorted(chosen)
 
 
-def select_exhaustive(scene, names, K: int, **engine_kw):
-    """Brute-force the best K-subset on the optimized MI. Returns
-    ``(best_indices, best_mi)``. Feasible only at small scale:
-    ``C(L,K)`` inner optimizations."""
-    best = None  # (combo, cap)
+def select_exhaustive(scene, names, K: int, *, k_wave: float = K_WAVE,
+                      P_relay: float = P_RELAY):
+    """Brute-force the best K-subset. Returns ``(best_indices, best_mi)``.
+    Feasible only at small scale: C(L,K) MI evaluations."""
+    best_set, best_mi = None, -np.inf
     for combo in itertools.combinations(range(len(names)), K):
-        cap = optimize_precoders(scene, "tx", [names[i] for i in combo], "rx",
-                                 **engine_kw)[0]
-        if best is None or cap > best[1]:
-            best = (combo, cap)
-    return sorted(best[0]), best[1]
+        mi = subset_mi(scene, [names[i] for i in combo], k_wave=k_wave, P_relay=P_relay)
+        if mi > best_mi:
+            best_mi, best_set = mi, combo
+    return sorted(best_set), best_mi
 
 
-def swap_search(scene, names, init, K: int, *, max_passes: int = 8, **engine_kw):
-    """1-swap local search on the optimized MI from ``init`` (list of
-    indices). Returns ``(improved_indices, mi)``; accepts any single swap
-    that raises ``f(S)``. Used to polish a greedy or rounded start."""
+def swap_search(scene, names, init, K: int, *, k_wave: float = K_WAVE,
+                P_relay: float = P_RELAY, max_passes: int = 8):
+    """1-swap local search from ``init`` (list of indices). Returns
+    ``(improved_indices, mi)``; greedily accepts any single swap that raises MI."""
     cur = list(init)
-    cur_cap = optimize_precoders(scene, "tx", [names[i] for i in cur], "rx",
-                                 **engine_kw)[0]
+    cur_mi = subset_mi(scene, [names[i] for i in cur], k_wave=k_wave, P_relay=P_relay)
     for _ in range(max_passes):
         improved = False
         for a in list(cur):
@@ -140,20 +118,19 @@ def swap_search(scene, names, init, K: int, *, max_passes: int = 8, **engine_kw)
                 if m in cur:
                     continue
                 trial = sorted([m if x == a else x for x in cur])
-                cap = optimize_precoders(scene, "tx", [names[i] for i in trial], "rx",
-                                         **engine_kw)[0]
-                if cap > cur_cap + 1e-9:
-                    cur, cur_cap, improved = trial, cap, True
+                mi = subset_mi(scene, [names[i] for i in trial], k_wave=k_wave,
+                               P_relay=P_relay)
+                if mi > cur_mi + 1e-9:
+                    cur, cur_mi, improved = trial, mi, True
         if not improved:
             break
-    return sorted(cur), cur_cap
+    return sorted(cur), cur_mi
 
 
 def random_subset_stats(scene, names, K: int, *, trials: int = 200,
                         seed: int = 0, k_wave: float = K_WAVE,
                         P_relay: float = P_RELAY):
-    """Mean / std / max / min scalar-AF MI over ``trials`` random K-subsets
-    (a baseline reference distribution; uses ``subset_mi``)."""
+    """Mean / std / max / min MI over ``trials`` random K-subsets."""
     rng = np.random.default_rng(seed)
     L = len(names)
     vals = np.array([
@@ -165,8 +142,6 @@ def random_subset_stats(scene, names, K: int, *, trials: int = 200,
 
 # --------------------------------------------------------------------------- #
 # Continuous-to-discrete: position-gradient PGA then grid rounding.            #
-# (Optimizes relay positions at the scalar-AF operating point; joint position+  #
-#  precoder optimization is a brush-up-phase refinement.)                       #
 # --------------------------------------------------------------------------- #
 def continuous_relays(K: int, lo, hi, *, starts: int = 4, iters: int = 300,
                       step: float = 0.04, d_min: float = 1.8, model: str = "near",
@@ -204,6 +179,7 @@ def continuous_relays(K: int, lo, hi, *, starts: int = 4, iters: int = 300,
                 s.move(v, c.tolist())
         with torch.no_grad():
             R = nfd.mi(nfd.multirelay_merge(s, "tx", vn, "rx", P_relay=P_relay)).item()
+        # s.params are exactly the movable virtual-relay centres v0..v{K-1}, in order.
         final = np.array([c.detach().tolist() for c in s.params])
         all_starts.append((final, R))
         if best is None or R > best[1]:
