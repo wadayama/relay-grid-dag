@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 [[package]]
 name = "cmi-dag"
 version = "0.6.0"
-source = { git = "https://github.com/wadayama/cmi-dag#21af74f09203f4d8ac7cae32ae32e54dbf489049" }
+source = { git = "https://github.com/wadayama/cmi-dag?rev=21af74f09203f4d8ac7cae32ae32e54dbf489049#21af74f09203f4d8ac7cae32ae32e54dbf489049" }
 dependencies = [
     { name = "torch" },
 ]
@@ -222,7 +222,7 @@ wheels = [
 [[package]]
 name = "gaussian-dag"
 version = "0.3.0"
-source = { git = "https://github.com/wadayama/gaussian-dag#2d8abc5cb0a89fd1ba9309905a178530d8ee8aab" }
+source = { git = "https://github.com/wadayama/gaussian-dag?rev=2d8abc5cb0a89fd1ba9309905a178530d8ee8aab#2d8abc5cb0a89fd1ba9309905a178530d8ee8aab" }
 dependencies = [
     { name = "numpy" },
     { name = "torch" },
@@ -829,8 +829,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cmi-dag", git = "https://github.com/wadayama/cmi-dag" },
-    { name = "gaussian-dag", git = "https://github.com/wadayama/gaussian-dag" },
+    { name = "cmi-dag", git = "https://github.com/wadayama/cmi-dag?rev=21af74f09203f4d8ac7cae32ae32e54dbf489049" },
+    { name = "gaussian-dag", git = "https://github.com/wadayama/gaussian-dag?rev=2d8abc5cb0a89fd1ba9309905a178530d8ee8aab" },
     { name = "matplotlib", marker = "extra == 'examples'", specifier = ">=3.10" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "torch", specifier = ">=2.12" },

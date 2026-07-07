@@ -54,19 +54,23 @@ def _eye(n):
 
 
 def grid_coords(nx=4, ny=4, xr=(6.0, 14.0), yr=(-4.0, 4.0)) -> np.ndarray:
-    xs = np.linspace(xr[0], xr[1], nx)
-    ys = np.linspace(yr[0], yr[1], ny)
-    return np.asarray([(float(x), float(y)) for y in ys for x in xs], dtype=float)
+    """Candidate grid for the multi-pair studies. Delegates to
+    :func:`relay_grid_dag.grid.grid_coords`; only the default size differs
+    (4x4 here --- the multi-root CMI evaluations are costlier per subset)."""
+    from .grid import grid_coords as _grid_coords
+    return _grid_coords(nx, ny, xr, yr)
 
 
 def build_pair_scene(pairs=DEFAULT_PAIRS, *, coords: np.ndarray | None = None,
                      n_tx: int = N_TX, n_rx: int = N_RX, n_relay: int = N_RELAY,
-                     model: str = "near"):
+                     model: str = "near", direct_atten: float = DIRECT_ATTEN):
     """Scene with ``M`` Tx/Rx pairs (``tx{u}``/``rx{u}``) and an ``L``-candidate relay
-    grid. ``pairs`` is a list of ``(tx_xy, rx_xy)``. Returns ``(scene, names, coords)``."""
+    grid. ``pairs`` is a list of ``(tx_xy, rx_xy)``. ``direct_atten`` is stored on
+    the scene so field rendering (``viz``) uses the same desired-link blockage as
+    the rate model. Returns ``(scene, names, coords)``."""
     if coords is None:
         coords = grid_coords()
-    s = nfd.Scene(model=model)
+    s = nfd.Scene(model=model, direct_atten=direct_atten)
     for u, (tx_xy, rx_xy) in enumerate(pairs):
         s.add_node(f"tx{u}", list(tx_xy), n_tx, "source")
         s.add_node(f"rx{u}", list(rx_xy), n_rx, "sink")
@@ -80,14 +84,16 @@ def build_pair_scene(pairs=DEFAULT_PAIRS, *, coords: np.ndarray | None = None,
 def pair_rates(scene, M: int, active, *, P_tx: float = P_TX, P_relay: float = P_RELAY,
                sigma_r: float = SIGMA_R, sigma_d: float = SIGMA_D,
                direct_atten: float = DIRECT_ATTEN, cross_atten: float = CROSS_ATTEN,
-               n_tx: int = N_TX, n_rx: int = N_RX, jitter: float = 1e-9):
+               jitter: float = 1e-9):
     """Per-pair TIN and interference-free rates (bits) for ``M`` pairs and an active
-    relay-name list. Returns ``{"tin": [R_0..R_{M-1}], "free": [...]}``."""
+    relay-name list. Antenna counts are read from the scene. Returns
+    ``{"tin": [R_0..R_{M-1}], "free": [...]}``."""
     K = len(active)
     Xs = list(range(M))                              # roots X_0..X_{M-1}
     relays = list(range(M, M + K))                   # relay nodes
     Ys = list(range(M + K, 2 * M + K))               # sinks Y_0..Y_{M-1}
-    Sx = [(P_tx / n_tx) * _eye(n_tx) for _ in range(M)]
+    Sx = [(P_tx / scene.n_ant(f"tx{u}")) * _eye(scene.n_ant(f"tx{u}"))
+          for u in range(M)]
 
     edge, parents, noise = {}, {}, {}
     gains = {}
@@ -109,7 +115,7 @@ def pair_rates(scene, M: int, active, *, P_tx: float = P_TX, P_relay: float = P_
         for r, nm in zip(relays, active):
             edge[(Yu, r)] = gains[nm] * scene.channel(nm, f"rx{u}")
             parents[Yu].append(r)
-        noise[Yu] = sigma_d ** 2 * _eye(n_rx)
+        noise[Yu] = sigma_d ** 2 * _eye(scene.n_ant(f"rx{u}"))
 
     Kb = compute_k_blocks_multiroot(
         num_nodes=2 * M + K, roots=Xs, parents=parents, edge_mats=edge,
@@ -139,6 +145,8 @@ def min_rate(scene, M, active, **kw) -> float:
 
 
 def _greedy(score, L, K):
+    if K > L:
+        raise ValueError(f"K={K} exceeds the L={L} candidates")
     chosen, remaining = [], set(range(L))
     for _ in range(K):
         best_j, best = None, -np.inf
@@ -158,6 +166,8 @@ def select_greedy_sumrate(scene, M, names, K, *, objective=weighted_sum_rate, **
 
 def select_exhaustive_sumrate(scene, M, names, K, *, objective=weighted_sum_rate, **kw):
     """Brute-force the best K-subset for the multi-pair objective. Small L only."""
+    if K > len(names):
+        raise ValueError(f"K={K} exceeds the L={len(names)} candidates")
     best_set, best = None, -np.inf
     for combo in itertools.combinations(range(len(names)), K):
         v = objective(scene, M, [names[i] for i in combo], **kw)
@@ -169,6 +179,8 @@ def select_exhaustive_sumrate(scene, M, names, K, *, objective=weighted_sum_rate
 def received_power_pairs(scene, M, names, K) -> list[int]:
     """Interference-blind baseline: rank candidates by the desired two-hop cascade
     gain summed over pairs, take the top K (ignores the cross/interference paths)."""
+    if K <= 0:
+        return []
     scores = np.zeros(len(names))
     with torch.no_grad():
         for i, nm in enumerate(names):

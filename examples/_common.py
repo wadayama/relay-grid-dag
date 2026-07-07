@@ -29,6 +29,35 @@ os.makedirs(OUT, exist_ok=True)
 
 
 # --------------------------------------------------------------------------- #
+# Canonical paper scenes (Sec. VII). Every single-pair experiment uses          #
+# canonical_scene(); every two-pair experiment uses pair_scene(). Both are the  #
+# 5x5 (L=25) candidate grid of the interactive demos.                           #
+# --------------------------------------------------------------------------- #
+# Two-pair terminal geometry = the 2-pair demo's INIT_POS.
+PAIR_POS = [((0.0, 2.5), (20.0, 2.5)), ((0.0, -2.5), (20.0, -2.5))]
+PAIR_DIRECT_ATTEN = 0.3
+PAIR_CROSS_ATTEN = 0.3
+
+
+def canonical_scene(model: str = "near"):
+    """The frozen single-pair scene of SPEC.md Sec. 10 (= library defaults;
+    the 2-pair demo shares this grid, the single-pair demo widens it): 5x5
+    candidate grid on x in [6,14], y in [-4,4], Tx at (0,0) / Rx at (20,0),
+    8/8/4-element ULAs, direct atten 0.3. Returns ``(scene, names, coords)``."""
+    return build_candidate_scene(model)
+
+
+def pair_scene(model: str = "near"):
+    """The two-pair scene of the interactive 2-pair demo: same 5x5 grid,
+    4/4/4-element ULAs, pairs at (0,+-2.5) -> (20,+-2.5), direct/cross atten
+    0.3/0.3. Returns ``(scene, names, coords)``."""
+    import relay_grid_dag.multipair as mp
+    coords = mp.grid_coords(GRID_NX, GRID_NY, GRID_X, GRID_Y)
+    return mp.build_pair_scene(pairs=PAIR_POS, coords=coords, model=model,
+                               direct_atten=PAIR_DIRECT_ATTEN)
+
+
+# --------------------------------------------------------------------------- #
 # Matplotlib helpers.                                                          #
 # --------------------------------------------------------------------------- #
 def paper_style():

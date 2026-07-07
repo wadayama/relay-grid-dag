@@ -27,6 +27,8 @@ def af_gain(H_sr: torch.Tensor, input_cov: torch.Tensor,
     frozen ``g`` makes the diamond linear in the precoder, so water-filling is the
     exact precoder optimum.
     """
+    if P_relay <= 0:
+        raise ValueError(f"P_relay must be positive, got {P_relay}")
     n_r = H_sr.shape[0]
     Sig_r = (sigma_r ** 2) * torch.eye(n_r, dtype=DTYPE)
     K_11 = H_sr @ input_cov @ H_sr.mH + Sig_r

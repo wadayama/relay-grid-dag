@@ -35,19 +35,27 @@ __all__ = [
 # --------------------------------------------------------------------------- #
 # Scalar-AF baseline MI (the conventional relay; computed directly, the bound).  #
 # --------------------------------------------------------------------------- #
-def subset_mi(scene, subset, *, k_wave: float = K_WAVE, P_relay: float = P_RELAY) -> float:
+def subset_mi(scene, subset, *, src: str = "tx", dst: str = "rx",
+              k_wave: float = K_WAVE, P_tx: float = 100.0,
+              P_relay: float = P_RELAY) -> float:
     """Scalar-AF baseline MI in bits for the diamond formed by activating
     ``subset`` relays plus the (attenuated) direct path. This is the conventional
     amplify-and-forward relay (a power-normalized scalar gain, no precoder
     optimization). ``subset=[]`` is the direct link."""
+    subset = list(subset)
+    if len(set(subset)) != len(subset):
+        raise ValueError(f"duplicate relay names in subset: {subset}")
     with torch.no_grad():
-        spec = nfd.multirelay_merge(scene, "tx", list(subset), "rx",
-                                    P_relay=P_relay, k_wave=k_wave)
+        spec = nfd.multirelay_merge(scene, src, subset, dst,
+                                    P_tx=P_tx, P_relay=P_relay, k_wave=k_wave)
         return nfd.mi(spec).item()
 
 
-def direct_only_mi(scene, *, k_wave: float = K_WAVE, P_relay: float = P_RELAY) -> float:
-    return subset_mi(scene, [], k_wave=k_wave, P_relay=P_relay)
+def direct_only_mi(scene, *, src: str = "tx", dst: str = "rx",
+                   k_wave: float = K_WAVE, P_tx: float = 100.0,
+                   P_relay: float = P_RELAY) -> float:
+    return subset_mi(scene, [], src=src, dst=dst, k_wave=k_wave,
+                     P_tx=P_tx, P_relay=P_relay)
 
 
 # --------------------------------------------------------------------------- #
@@ -92,6 +100,8 @@ def select_greedy(scene, names, K: int, *, warm_start: bool = True, **engine_kw)
     ``engine_kw`` is forwarded to :func:`optimize_precoders` (``iters``, ``P_tx``,
     ``P_relay``, ``k_wave``, ``restarts``, ...). With ``warm_start`` (default), each
     candidate is seeded from the current active set's optimum (the new relay random)."""
+    if K > len(names):
+        raise ValueError(f"K={K} exceeds the L={len(names)} candidates")
     chosen: list[int] = []
     remaining = set(range(len(names)))
     F_star, W_star = None, []
@@ -117,6 +127,8 @@ def select_exhaustive(scene, names, K: int, **engine_kw):
     """Brute-force the best K-subset on the optimized MI. Returns
     ``(best_indices, best_mi)``. Feasible only at small scale:
     ``C(L,K)`` inner optimizations."""
+    if K > len(names):
+        raise ValueError(f"K={K} exceeds the L={len(names)} candidates")
     best = None  # (combo, cap)
     for combo in itertools.combinations(range(len(names)), K):
         cap = optimize_precoders(scene, "tx", [names[i] for i in combo], "rx",

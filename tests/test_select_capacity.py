@@ -58,7 +58,10 @@ def test_greedy_capacity_near_oracle_and_beats_baseline():
 
 def test_warm_start_matches_cold_start():
     """Greedy with warm start reaches essentially the same MI as cold start
-    (warm start is a speedup, not a different answer) on a small scene."""
+    (warm start is a speedup, not a different answer) on a small scene.
+
+    Note: this compares two independent non-convex optimizations within a small
+    tolerance; it is the most platform-tolerance-sensitive assertion in the suite."""
     s, names, _ = _small_scene()
     kw = dict(P_tx=P_TX, P_relay=P_RELAY, iters=150)
     warm = rgd.select_greedy(s, names, 2, warm_start=True, **kw)
@@ -66,3 +69,18 @@ def test_warm_start_matches_cold_start():
     cap_warm = optimize_precoders(s, "tx", [names[i] for i in warm], "rx", **kw)[0]
     cap_cold = optimize_precoders(s, "tx", [names[i] for i in cold], "rx", **kw)[0]
     assert abs(cap_warm - cap_cold) < 0.05
+
+
+def test_swap_search_polishes_and_returns_value():
+    """swap_search returns (indices, mi), never lowers f(S) below its start, and
+    matches the exhaustive oracle on this small scene (K=2)."""
+    s, names, _ = _small_scene()
+    kw = dict(P_tx=P_TX, P_relay=P_RELAY, iters=120)
+    start = rgd.select_received_power(s, names, 2)          # a weak start to polish
+    start_cap = optimize_precoders(s, "tx", [names[i] for i in start], "rx", **kw)[0]
+
+    sw_idx, sw_cap = rgd.swap_search(s, names, start, 2, iters=120)
+    assert isinstance(sw_idx, list) and len(sw_idx) == 2
+    assert sw_cap >= start_cap - 1e-6                       # never worse than the start
+    _, o_cap = rgd.select_exhaustive(s, names, 2, **kw)
+    assert sw_cap >= 0.95 * o_cap                           # reaches near the oracle

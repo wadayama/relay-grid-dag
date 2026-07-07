@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from .channel import DTYPE, near_field_channel
+from .channel import DTYPE, far_field_channel, near_field_channel
 
 
 def rxpow(H: torch.Tensor, P: float) -> float:
@@ -43,19 +43,22 @@ def field_intensity(scene, src, grid, *, F, relays=(), relay_mats=None) -> torch
     scene channels --- the same quantities that produce the mutual information ---
     so the field and the MI describe one transmit configuration (SPEC.md Sec. 6).
     Evaluated at the Rx array, ``sum_pixels`` of this equals ``tr(G_eff G_eff^H)``
-    (the model received signal power); the tie-point test T1 checks this. Returns a
-    linear-power tensor of shape ``(n_pix,)`` (uses ``r_ref``/``r_min``; near-field).
+    (the model received signal power); the tie-point test T1 checks this. The
+    probe channel follows ``scene.model`` (near or far), the same physics as the
+    MI. Returns a linear-power tensor of shape ``(n_pix,)``.
     """
-    rr, rm = scene.r_ref, scene.r_min
+    def chan(rx_pos, tx_pos):
+        if scene.model == "near":
+            return near_field_channel(rx_pos, tx_pos, r_ref=scene.r_ref,
+                                      r_min=scene.r_min)
+        return far_field_channel(rx_pos, tx_pos, r_ref=scene.r_ref)
+
     with torch.no_grad():
         tx = scene.positions(src)
-        G = scene.direct_atten * (near_field_channel(grid, tx, r_ref=rr, r_min=rm) @ F)
+        G = scene.direct_atten * (chan(grid, tx) @ F)
         for i, relay in enumerate(relays):
             rly = scene.positions(relay)
-            H_sr = near_field_channel(rly, tx, r_ref=rr, r_min=rm)
-            H_gp = near_field_channel(grid, rly, r_ref=rr, r_min=rm)
-            W = relay_mats[i].to(DTYPE)
-            G = G + H_gp @ (W @ (H_sr @ F))
+            G = G + chan(grid, rly) @ (relay_mats[i].to(DTYPE) @ (chan(rly, tx) @ F))
         return (G.abs() ** 2).sum(dim=1)
 
 

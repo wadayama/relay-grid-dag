@@ -110,7 +110,7 @@ def _build_init(scene, pairs, active, *, P_tx, P_relay, sigma_r, F_init, W_init,
     F0 = []
     for k, u in enumerate(pairs):
         n = scene.n_ant(f"tx{u}")
-        if F_init is not None and F_init[k] is not None:
+        if F_init is not None and k < len(F_init) and F_init[k] is not None:
             F0.append(_proj_ball(F_init[k].detach().to(DTYPE).clone(), P_tx))
         else:
             F0.append(_proj_ball(_randc(n, n, g), P_tx))

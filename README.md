@@ -3,24 +3,26 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.12-blue.svg)](https://www.python.org/)
 
-**Near-field Relay Grid (NRG):** sparse activation / selection of
-candidate relays for geometry-aware mutual-information channel shaping.
+**Near-field Relay Grid:** differentiable joint precoding and relay selection
+for geometry-aware mutual-information channel shaping.
 
-Given a transmitter, a receiver, and a grid of `L` candidate relay sites, NRG
-*activates a few* (`K ≪ L`) to actively shape the near-field channel. This library
-provides the **selection / activation layer** — candidate grids, greedy / swap /
-exhaustive / received-power / distance strategies, and the continuous-to-discrete
-position-gradient pipeline — on top of an analytic near-field physics engine.
+Given a transmitter, a receiver, and a grid of `L` candidate relay sites, this
+library **jointly optimizes the Tx precoder `F` and a matrix precoder `W_l` at
+every active relay** (the primary engine), and **selects which `K ≪ L` relays to
+activate** on top of the optimized MI. Because the precoded merge network is a
+linear Gaussian DAG, one complex reverse-mode AD sweep returns the exact Wirtinger
+gradient w.r.t. `F` and all `{W_l}` at once, and projected gradient ascent maximizes
+the MI. A multi-pair layer extends this to `M` interfering pairs sharing the grid.
 
 ```
-geometry  ──►  {H_k}  ──►  K-recursion MI  ──►  select K of L relays
- Tx/Rx/grid   spherical    (gaussian-dag)        greedy / swap / oracle
-              -wave LoS                          received-power / distance
+geometry  ──►  {H_k}  ──►  precoded merge  ──►  AD/PGA engine  ──►  select K of L
+ Tx/Rx/grid   spherical    F, {W_l}           optimized MI f(S)    greedy / swap /
+              -wave LoS     linear-Gauss DAG   (K-recursion)        oracle / baselines
 ```
 
-The selection layer is plain combinatorics on top of one physics call,
-`mi(multirelay_merge(...))`; the channel model and the K-recursion are never
-reimplemented here. The mathematics is summarised in [`MATH.md`](MATH.md).
+The channel model and the K-recursion are never reimplemented here — they come from
+the sibling `gaussian-dag` (single-root MI) and `cmi-dag` (multi-root conditional
+MI). The mathematics is summarised in [`MATH.md`](MATH.md).
 
 ## Architecture and dependencies
 
@@ -54,7 +56,9 @@ channel matrix `H_k`.
 
 - Python ≥ 3.12
 - `gaussian-dag`, `cmi-dag`, PyTorch ≥ 2.12, NumPy ≥ 2.0 (installed as dependencies)
-- [`uv`](https://docs.astral.sh/uv/) for environment management (recommended)
+- [`uv`](https://docs.astral.sh/uv/) for environment management — **required**: the
+  two MI-kernel dependencies are Git sources pinned in `uv.lock` (a plain
+  `pip install .` cannot resolve them).
 
 ## Installation
 
@@ -73,17 +77,20 @@ fresh clone builds the whole environment in one `uv sync`.
 ```
 relay-grid-dag/
 ├── relay_grid_dag/
-│   ├── _nearfield/      vendored near-field physics (channels, Scene, mi, OFDM, viz)
-│   ├── grid.py          candidate-grid geometry + scene builder
-│   ├── selection.py     K-of-L selection: greedy / swap / exhaustive / baselines
-│   │                    + continuous-to-discrete (position-gradient PGA → rounding)
-│   └── __init__.py      public API (physics re-exports + selection layer)
-├── examples/            runnable precoded-model studies (E1–E4) + multi-pair demo
-├── archive/             superseded isotropic code (reference only, not imported)
+│   ├── _nearfield/            vendored near-field physics (channels, Scene, mi, OFDM, viz)
+│   ├── grid.py                candidate-grid geometry + scene builder
+│   ├── precoding.py           differentiable joint Tx/relay precoding engine (AD/PGA)
+│   ├── selection.py           K-of-L selection: greedy / swap / exhaustive / baselines
+│   │                          + continuous-to-discrete (position-gradient PGA → rounding)
+│   ├── multipair.py           M-pair scalar-AF rates via cmi-dag conditional MI
+│   ├── multipair_precoding.py M-pair matrix-relay engine (TIN sum-rate / max-min)
+│   └── __init__.py            public API (physics re-exports + precoding + selection)
+├── examples/            runnable experiment suite (exp0–exp7) + interactive demos
+├── archive/             superseded code (reference only, not imported)
 ├── docs/                a five-part tutorial walkthrough
 ├── references/          background notes + key literature
-├── tests/               regression tests (physics + selection)
-├── MATH.md              mathematical foundations (selection layer)
+├── tests/               regression tests (physics + precoding + selection + multi-pair)
+├── MATH.md              mathematical foundations
 └── pyproject.toml
 ```
 
@@ -118,6 +125,16 @@ print(rgd.subset_mi(scene, [names[i] for i in g]))              # scalar-AF base
 best, best_cap = rgd.select_exhaustive(scene, names, 2, iters=50)  # exhaustive on MI (small L)
 ```
 
+For **multi-pair interference** — `M` pairs sharing the grid, where matrix relays
+spatially separate the streams a scalar relay cannot:
+
+```python
+scene, names, coords = rgd.build_pair_scene()                  # 2 pairs, shared grid
+active = [names[i] for i in rgd.select_greedy_sumrate(scene, 2, names, 2)]
+obj, F_list, W_list, tin = rgd.optimize_multipair(scene, [0, 1], active, objective="sumrate")
+print(tin)                                                     # per-pair TIN rates, bits
+```
+
 For wideband (OFDM), evaluate per-subcarrier and sum:
 
 ```python
@@ -125,8 +142,9 @@ k_waves = rgd.subcarrier_wavenumbers(f_c=10.0, S=8, df=0.4)
 sumrate = sum(rgd.subset_mi(scene, [names[i] for i in g], k_wave=k) for k in k_waves)
 ```
 
-See [`examples/`](examples/) for the runnable studies (E1–E4), including the
-carrier-field map (`e4_carrier_field.py`).
+See [`examples/`](examples/) for the runnable experiment suite (`exp0_setup.py`
+through `exp7_mimap.py`, one figure each) and the interactive demos
+(`relay_grid_demo.py`, `relay_grid_demo_2pair.py`).
 
 ## Public API
 
@@ -150,8 +168,8 @@ All symbols below are re-exported from the top-level `relay_grid_dag` package.
 
 | Symbol | Purpose |
 | --- | --- |
-| `subset_mi(scene, subset, *, k_wave=2π, P_relay=100)` | Conventional scalar-AF relay MI in bits (the baseline; no precoder optimization). `subset=[]` is direct-only. FD value (see Conventions). |
-| `direct_only_mi(scene, *, k_wave=2π)` | Scalar-AF MI of the direct link alone (`subset=[]`). |
+| `subset_mi(scene, subset, *, src="tx", dst="rx", k_wave=2π, P_tx=100, P_relay=100)` | Conventional scalar-AF relay MI in bits (the baseline; no precoder optimization). `subset=[]` is direct-only. FD value (see Conventions). |
+| `direct_only_mi(scene, *, src="tx", dst="rx", k_wave=2π, P_tx=100, P_relay=100)` | Scalar-AF MI of the direct link alone (`subset=[]`). |
 
 ### Selection strategies (this package) — on the MI `f(S)`
 
@@ -180,10 +198,12 @@ from the multi-root conditional MI.
 
 | Symbol | Purpose |
 | --- | --- |
-| `build_pair_scene(pairs=…, *, n_relay=4)` | Scene with `M` pairs (`tx{u}`/`rx{u}`) + candidate grid. Returns `(scene, names, coords)`. |
-| `pair_rates(scene, M, active, *, cross_atten=0.3, …)` | Per-pair `{"tin": [..], "free": [..]}`: `R_u^TIN = I(X_u;Y_u\|∅)` (interference as noise) and `R_u^free = I(X_u;Y_u\|X_others)` (genie bound). |
-| `weighted_sum_rate(scene, M, active, *, weights=None)` | `Σ_u w_u R_u^TIN` objective. |
-| `min_rate(scene, M, active)` | Max-min objective `min_u R_u^TIN`. |
+| `build_pair_scene(pairs=…, *, n_tx=4, n_rx=4, n_relay=4, direct_atten=0.3)` | Scene with `M` pairs (`tx{u}`/`rx{u}`) + candidate grid; stores `direct_atten` on the scene (so `viz` matches the rates). Returns `(scene, names, coords)`. |
+| `optimize_multipair(scene, pairs, active, *, objective="sumrate"\|"minrate", iters=300, restarts=1, cross_atten=0.3, …)` | Optimize the matrix relays `{W_l}` and Tx precoders `{F_u}` for the TIN sum-rate or max-min → `(obj_bits, F_list, Wphys_list, per_pair_tin)`. The **matrix-relay** engine (spatial nulling a scalar relay cannot do). |
+| `multipair_tin(scene, pairs, active, F_list, Wphys, *, cross_atten=0.3, …)` | Per-pair TIN rates `[R_u]` (bits) for given precoders — the differentiable objective `optimize_multipair` ascends. |
+| `pair_rates(scene, M, active, *, cross_atten=0.3, …)` | **Scalar-AF baseline**: per-pair `{"tin": [..], "free": [..]}` — `R_u^TIN = I(X_u;Y_u)` (interference as noise) and `R_u^free = I(X_u;Y_u\|X_others)` (genie bound). Antenna counts read from the scene. |
+| `weighted_sum_rate(scene, M, active, *, weights=None)` | `Σ_u w_u R_u^TIN` objective (scalar-AF). |
+| `min_rate(scene, M, active)` | Max-min objective `min_u R_u^TIN` (scalar-AF). |
 | `select_greedy_sumrate(scene, M, names, K, *, objective=…)` | Greedy on the multi-pair objective. |
 | `select_exhaustive_sumrate(scene, M, names, K, *, objective=…)` | Brute-force best K-subset (small L). |
 | `received_power_pairs(scene, M, names, K)` | Interference-blind baseline (desired cascade gain). |
@@ -250,7 +270,9 @@ achieves `SE_HD = (1/2) SE_FD`. We keep the ½ out of the code: figures/tables r
 
 ## Roadmap
 
-- Multi-pair interference (shared-subcarrier) via the sibling `cmi-dag`.
+- Per-subcarrier (OFDM) multi-pair interference management.
+- Half-duplex joint two-slot receiver as the realized model (beyond the ½ convention).
+- Ray-traced multipath channels beyond the line-of-sight scope.
 
 ## Citation
 

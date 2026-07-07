@@ -1,7 +1,7 @@
 [project]
 name = "relay-grid-dag"
 version = "0.1.0"
-description = "Near-field Programmable Relay Grid: sparse activation / selection of candidate relays for geometry-aware mutual-information channel shaping, on the gaussian-dag K-recursion."
+description = "Near-field Relay Grid: differentiable joint Tx/relay precoding and relay selection for geometry-aware mutual-information channel shaping, on the gaussian-dag K-recursion."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -25,11 +25,12 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 dependencies = [
-    "gaussian-dag",
-    "cmi-dag",
+    "gaussian-dag>=0.3",
+    "cmi-dag>=0.6",
     "torch>=2.12",
     "numpy>=2.0",
 ]
@@ -49,13 +50,15 @@ Homepage = "https://github.com/wadayama/relay-grid-dag"
 Repository = "https://github.com/wadayama/relay-grid-dag"
 Issues = "https://github.com/wadayama/relay-grid-dag/issues"
 
-# Depend only on the public gaussian-dag (K-recursion MI kernel). The near-field
-# physics (spherical-wave LoS channels + DAG specs) is vendored under
-# relay_grid_dag/_nearfield/ -- a frozen copy of wadayama/nearfield-dag, kept
-# canonical here; the upstream repo continues as a separate movable-relay theme.
+# The public MI kernels: gaussian-dag (single-root K-recursion) and cmi-dag
+# (multi-root conditional MI). Resolved from Git and pinned to a specific commit
+# so `uv lock --upgrade` does not silently track upstream HEAD. NOTE: these are
+# uv-only sources (a plain `pip install .` cannot resolve the bare requirements);
+# use `uv sync`. The near-field physics is vendored under relay_grid_dag/_nearfield/
+# -- a frozen copy of wadayama/nearfield-dag, kept canonical here.
 [tool.uv.sources]
-gaussian-dag = { git = "https://github.com/wadayama/gaussian-dag" }
-cmi-dag = { git = "https://github.com/wadayama/cmi-dag" }
+gaussian-dag = { git = "https://github.com/wadayama/gaussian-dag", rev = "2d8abc5cb0a89fd1ba9309905a178530d8ee8aab" }
+cmi-dag = { git = "https://github.com/wadayama/cmi-dag", rev = "21af74f09203f4d8ac7cae32ae32e54dbf489049" }
 
 [build-system]
 requires = ["hatchling"]

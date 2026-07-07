@@ -79,6 +79,23 @@ def test_near_field_higher_rank_than_far():
     assert best_near > best_far
 
 
+def test_t3_far_field_rank_one_near_field_high_rank():
+    """T3 (SPEC.md §8): the far-field direct channel collapses to rank one, while
+    the near-field channel is genuinely high-rank at the same geometry."""
+    sn, _, _ = rgd.build_candidate_scene("near")
+    sf, _, _ = rgd.build_candidate_scene("far")
+    H_near = sn.channel("tx", "rx", atten=sn.direct_atten)
+    H_far = sf.channel("tx", "rx", atten=sf.direct_atten)
+    s_far = torch.linalg.svdvals(H_far).double()
+    s_near = torch.linalg.svdvals(H_near).double()
+    # far field: a single dominant singular value (numerically rank one)
+    assert float(s_far[1] / s_far[0]) < 1e-6
+    assert rgd.viz.effrank(H_far) < 1.01
+    # near field at the same 20-lambda link: effective rank clearly above one
+    assert rgd.viz.effrank(H_near) > 1.2
+    assert float(s_near[1] / s_near[0]) > 1e-3
+
+
 def test_continuous_to_discrete_recovers_selection():
     """continuous position PGA -> grid rounding lands at a strong on-grid set
     (scored by the scalar-AF baseline MI)."""
@@ -119,3 +136,35 @@ def test_p_relay_plumbed_through_baseline():
     _, mi_lo = _oracle_af(s, names, 2, P_relay=10.0)
     _, mi_hi = _oracle_af(s, names, 2, P_relay=1000.0)
     assert mi_hi > mi_lo
+
+
+def test_input_validation():
+    """Selectors and the baseline reject nonsensical inputs with clear errors,
+    instead of returning wrong results or failing deep in the K-recursion."""
+    import pytest
+
+    s, names, coords = rgd.build_candidate_scene("near", coords=rgd.grid_coords(2, 1))
+    assert len(names) == 2
+    # K > L: greedy and exhaustive both raise (not NoneType crashes)
+    with pytest.raises(ValueError):
+        rgd.select_greedy(s, names, 3, iters=5)
+    with pytest.raises(ValueError):
+        rgd.select_exhaustive(s, names, 3, iters=5)
+    # duplicate relays in a subset are rejected (silent double-counting otherwise)
+    with pytest.raises(ValueError):
+        rgd.subset_mi(s, [names[0], names[0]])
+    with pytest.raises(ValueError):
+        rgd.optimize_precoders(s, "tx", [names[0], names[0]], "rx", iters=5)
+    # non-positive power budgets are rejected
+    with pytest.raises(ValueError):
+        rgd.optimize_precoders(s, "tx", [names[0]], "rx", P_relay=-1.0, iters=5)
+
+
+def test_multipair_received_power_k0_and_kgtl():
+    """The multi-pair baseline guards K=0 (not the whole grid) and K>L raises."""
+    import pytest
+
+    s, names, _ = rgd.build_pair_scene(coords=rgd.grid_coords(2, 1))
+    assert rgd.received_power_pairs(s, 2, names, 0) == []       # K=0 -> empty, not all
+    with pytest.raises(ValueError):
+        rgd.select_greedy_sumrate(s, 2, names, 5)

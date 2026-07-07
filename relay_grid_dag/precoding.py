@@ -157,6 +157,11 @@ def optimize_precoders(scene, src, subset, dst, *, P_tx=100.0, P_relay=100.0,
     empirically (large margin in practice), not by construction.
     """
     subset = list(subset)
+    if len(set(subset)) != len(subset):
+        raise ValueError(f"duplicate relay names in subset: {subset}")
+    if P_tx <= 0 or P_relay <= 0:
+        raise ValueError(f"power budgets must be positive (P_tx={P_tx}, "
+                         f"P_relay={P_relay})")
     n_tx = scene.n_ant(src)
     d = n_tx if d is None else d
     best = None

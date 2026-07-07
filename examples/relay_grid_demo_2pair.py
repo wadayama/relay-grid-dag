@@ -84,8 +84,8 @@ SPECS = (f"near-field LoS, 2 pairs (TIN)  |  Tx/Rx: {N_TX}-elem ULA, relay: {N_R
 def build_scene(pos):
     pairs = [(pos["tx0"], pos["rx0"]), (pos["tx1"], pos["rx1"])]
     s, names, _ = mp.build_pair_scene(pairs=pairs, coords=_COORDS,
-                                      n_tx=N_TX, n_rx=N_RX, n_relay=N_RELAY)
-    s.direct_atten = DIRECT_ATTEN          # so the carrier field's direct term matches
+                                      n_tx=N_TX, n_rx=N_RX, n_relay=N_RELAY,
+                                      direct_atten=DIRECT_ATTEN)
     return s, names
 
 
