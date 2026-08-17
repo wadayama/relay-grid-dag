@@ -24,3 +24,9 @@ notes/legacy/*.txt
 
 # local-only rescued legacy notes (kept on disk/Dropbox, NOT on GitHub)
 notes/legacy/
+
+# ICC 2027 submission manuscript (kept local; not published)
+icc2027/
+
+# stray LaTeX artifact from an interrupted run
+texput.log
