@@ -8,14 +8,6 @@ build/
 examples/out/
 .DS_Store
 
-# LaTeX build artifacts (keep .tex/.pdf/figures, drop intermediates)
-paper/*.aux
-paper/*.log
-paper/*.out
-paper/*.toc
-paper/*.synctex.gz
-paper/*.fls
-paper/*.fdb_latexmk
 # exported session transcripts
 *-this-session-is-being-continued-from-a-previous-c.txt
 
@@ -32,7 +24,7 @@ icc2027/
 texput.log
 
 # Non-code material is never published: manuscripts, notes, docs, math notes
-paper/
+paper-full/
 docs/
 references/
 notes/
