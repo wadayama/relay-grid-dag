@@ -39,7 +39,11 @@ def main(selftest=False):
 
     print(f"Rayleigh distance = {RAYLEIGH:.1f} lambda; sweeping d = "
           f"{dists[0]:.0f}..{dists[-1]:.0f}")
-    opt_n, opt_f, dir_n, dir_f, rk_n, rk_f = [], [], [], [], [], []
+    # matrix-vs-scalar decomposition: on the SAME selected sites, also optimize
+    # the scalar-AF gains (relay_structure="scalar") under both propagation
+    # models; the matrix-over-scalar gap localizes the value of matrix
+    # processing across the Rayleigh distance (reported in the text).
+    opt_n, opt_f, osc_n, osc_f, dir_n, dir_f, rk_n, rk_f = ([] for _ in range(8))
     for d in dists:
         coords = rgd.grid_coords(5, 5, (0.35 * d, 0.65 * d), (-0.12 * d, 0.12 * d))
         sn, names, _ = rgd.build_candidate_scene("near", coords=coords,
@@ -52,13 +56,18 @@ def main(selftest=False):
         dir_f.append(rgd.direct_only_mi(sf))
         idx = rgd.select_greedy(sn, names, K, iters=sel_iters)
         sub = [names[i] for i in idx]
-        opt_n.append(rgd.optimized_mi(sn, "tx", sub, "rx", iters=eval_iters,
-                                      restarts=restarts))
-        opt_f.append(rgd.optimized_mi(sf, "tx", sub, "rx", iters=eval_iters,
-                                      restarts=restarts))
+        kw = dict(iters=eval_iters, restarts=restarts)
+        opt_n.append(rgd.optimized_mi(sn, "tx", sub, "rx", **kw))
+        opt_f.append(rgd.optimized_mi(sf, "tx", sub, "rx", **kw))
+        osc_n.append(rgd.optimized_mi(sn, "tx", sub, "rx",
+                                      relay_structure="scalar", **kw))
+        osc_f.append(rgd.optimized_mi(sf, "tx", sub, "rx",
+                                      relay_structure="scalar", **kw))
         print(f"  d={d:5.1f}  set={idx}  rank near/far={rk_n[-1]:.2f}/{rk_f[-1]:.2f}  "
               f"direct near/far={dir_n[-1]:5.2f}/{dir_f[-1]:5.2f}  "
-              f"optimized near/far={opt_n[-1]:5.2f}/{opt_f[-1]:5.2f}")
+              f"optimized near/far={opt_n[-1]:5.2f}/{opt_f[-1]:5.2f}  "
+              f"matrix-over-scalar near/far="
+              f"{opt_n[-1] - osc_n[-1]:5.2f}/{opt_f[-1] - osc_f[-1]:5.2f}")
 
     fig, axL = plt.subplots(figsize=(7.6, 4.5))
     axL.plot(dists, opt_n, "o-", color="tab:blue", label=f"optimized, near ($K={K}$)")
