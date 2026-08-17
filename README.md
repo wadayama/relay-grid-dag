@@ -147,7 +147,7 @@ fresh clone:
 
 ```bash
 uv sync --extra examples           # one-shot environment (see Installation)
-uv run pytest                      # the 38 tie-point tests binding paper and code
+uv run pytest                      # the 40 tie-point tests binding paper and code
 uv run python examples/run_all.py  # smoke test: every experiment at reduced depth
 ```
 

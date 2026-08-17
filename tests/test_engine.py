@@ -4,7 +4,9 @@ These bind the engine (SPEC.md Sec. 4) to ground truths:
   T2 -- AD vs finite differences (validates the whitening + K-recursion chain),
   T4 -- optimized MI >= scalar-AF baseline (empirical; random init),
   T5 -- power budgets hold at the optimizer,
-  T6 -- direct-only MI == water-filling on the direct channel.
+  T6 -- direct-only MI == water-filling on the direct channel,
+  T7 -- optimized scalar-AF mode: exact w*I structure, budgets, ordering,
+  T8 -- network-total relay power mode: summed budget, per-relay dominance.
 
 Run: uv run pytest -q tests/test_engine.py
 """
@@ -106,3 +108,45 @@ def test_t6_direct_only_equals_waterfilling():
     assert opt <= wf_cap + 1e-6             # cannot beat capacity
     assert opt >= iso_direct - 1e-6         # at least the isotropic input
     assert opt >= wf_cap - 0.05             # reaches the water-filling optimum
+
+
+def test_t7_optimized_scalar_relay():
+    """T7 -- optimized scalar-AF mode (relay_structure="scalar"): the returned
+    relay matrices are exact scalar multiples of I, the per-relay power budgets
+    hold, and the value sits between the conventional scalar-AF baseline and
+    the full-matrix engine."""
+    s, names, _ = rgd.build_candidate_scene("near", n_tx=2, n_rx=2, n_relay=2)
+    subset = [names[6], names[12]]
+    conv = rgd.subset_mi(s, subset)
+    v_sc, F, Ws = optimize_precoders(s, "tx", subset, "rx", iters=200,
+                                     relay_structure="scalar")
+    v_full = optimize_precoders(s, "tx", subset, "rx", iters=200)[0]
+    for W in Ws:
+        n = W.shape[0]
+        off = float((W - W[0, 0] * torch.eye(n, dtype=W.dtype)).abs().max())
+        assert off < 1e-12                     # exactly w * I
+    for nm, W in zip(subset, Ws):
+        A = s.channel("tx", nm) @ F
+        K = A @ A.mH + torch.eye(A.shape[0], dtype=A.dtype)
+        assert float(torch.trace(W @ K @ W.mH).real) <= P_RELAY * (1 + 1e-9)
+    assert v_sc >= conv - 1e-6                 # optimized >= power-normalized
+    assert v_full >= v_sc - 1e-6               # matrix >= scalar
+
+
+def test_t8_total_relay_power():
+    """T8 -- network-total relay power mode (power_mode="total"): the summed
+    physical relay power respects P_R_tot, and with P_R_tot = P_relay the value
+    cannot exceed the per-relay-budget value (the total ball is a subset of the
+    per-relay balls)."""
+    s, names, _ = rgd.build_candidate_scene("near", n_tx=2, n_rx=2, n_relay=2)
+    subset = [names[6], names[12]]
+    v_tot, F, Ws = optimize_precoders(s, "tx", subset, "rx", iters=200,
+                                      power_mode="total", P_R_tot=P_RELAY)
+    v_pr = optimize_precoders(s, "tx", subset, "rx", iters=200)[0]
+    tot = 0.0
+    for nm, W in zip(subset, Ws):
+        A = s.channel("tx", nm) @ F
+        K = A @ A.mH + torch.eye(A.shape[0], dtype=A.dtype)
+        tot += float(torch.trace(W @ K @ W.mH).real)
+    assert tot <= P_RELAY * (1 + 1e-9)
+    assert v_tot <= v_pr + 0.1

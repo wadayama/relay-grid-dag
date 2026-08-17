@@ -83,17 +83,29 @@ def main(selftest=False):
     k_ext = K_MAX if selftest else K_EXT
     order = greedy_nested(scene, names, k_ext, iters=sel_iters)
     print(f"greedy add order: {order}  (S_k = first k)")
-    Ks, base, opt = [], [], []
+    # Four curves on the same nested sets: the conventional (power-normalized)
+    # scalar-AF relay, the OPTIMIZED complex-scalar-AF relay (same engine,
+    # relay_structure="scalar"), the full matrix relays under per-relay power,
+    # and the full matrix relays under a NETWORK-TOTAL relay budget equal to a
+    # single relay's budget (power_mode="total") -- the last curve isolates the
+    # spatial-DoF gain from the total-radiated-power confound.
+    Ks, base, osc, opt, tot = [], [], [], [], []
     for k in range(k_ext + 1):
         subset = [names[i] for i in sorted(order[:k])]
+        kw = dict(iters=eval_iters, restarts=restarts)
         Ks.append(k)
         base.append(rgd.subset_mi(scene, subset))
-        opt.append(rgd.optimized_mi(scene, "tx", subset, "rx",
-                                    iters=eval_iters, restarts=restarts))
-        print(f"  K={k}: scalar-AF={base[-1]:6.2f}  optimized={opt[-1]:6.2f}  "
-              f"gain={opt[-1] - base[-1]:+6.2f} bits/s/Hz")
+        osc.append(rgd.optimized_mi(scene, "tx", subset, "rx",
+                                    relay_structure="scalar", **kw))
+        opt.append(rgd.optimized_mi(scene, "tx", subset, "rx", **kw))
+        tot.append(rgd.optimized_mi(scene, "tx", subset, "rx",
+                                    power_mode="total", P_R_tot=P_RELAY, **kw))
+        print(f"  K={k}: conv-AF={base[-1]:6.2f}  opt-scalar={osc[-1]:6.2f}  "
+              f"matrix={opt[-1]:6.2f}  matrix-tot={tot[-1]:6.2f}  "
+              f"(matrix-vs-scalar {opt[-1] - osc[-1]:+5.2f})")
 
-    # ties: f(empty) = water-filling on the direct channel; monotone in K
+    # ties: f(empty) = water-filling on the direct channel; monotone in K;
+    # conventional <= optimized scalar <= full matrix on every nested set
     H_sd = scene.channel("tx", "rx", atten=scene.direct_atten).to(DT)
     wf = rgd.waterfilling_capacity(H_sd, (SIG ** 2) * torch.eye(scene.n_ant("rx"), dtype=DT),
                                    P_TX)[0]
@@ -101,6 +113,10 @@ def main(selftest=False):
           f"(gap {abs(opt[0] - wf):.1e})")
     mono = all(opt[i + 1] >= opt[i] - 1e-3 for i in range(k_ext))
     print(f"tie: monotone in K: {mono}")
+    hier_tol = 2.0 if selftest else 1e-6      # short PGA may not close the tie
+    hier = (all(s >= b - hier_tol for s, b in zip(osc, base))
+            and all(o >= s - hier_tol for o, s in zip(opt, osc)))
+    print(f"tie: conventional <= opt-scalar <= matrix: {hier}")
 
     # ---- (b) ablation at the fixed S_{K_ABL} ---------------------------------
     sel = [names[i] for i in sorted(order[:K_ABL])]
@@ -153,16 +169,27 @@ def main(selftest=False):
     gain_ablation_figure(K_MAX, "exp2_precoding_gain.pdf")
     if k_ext > K_MAX:
         gain_ablation_figure(k_ext, f"exp2_precoding_gain_k{k_ext}.pdf")
-        # single-panel gain-only variant (conference layout: the ablation is
-        # reported in the text, so panel (a) alone fits a single column)
-        figs, axs = plt.subplots(figsize=(6.4, 4.4))
-        draw_gain(axs, k_ext, "")
+        # single-panel conference figure: the four curves disentangle scalar
+        # optimization, matrix processing, and total radiated relay power
+        # (the ablation is reported in the text)
+        figs, axs = plt.subplots(figsize=(6.4, 4.6))
+        axs.plot(Ks, base, "o--", color="0.5", label="conventional scalar-AF")
+        axs.plot(Ks, osc, "d-.", color="tab:orange", label="optimized scalar-AF")
+        axs.plot(Ks, tot, "^--", color="tab:green",
+                 label=f"matrix, total power ${P_RELAY:.0f}$")
+        axs.plot(Ks, opt, "s-", color="tab:blue", label="matrix, per-relay power")
+        axs.plot([0], [wf], "*", color="tab:red", ms=13, zorder=6,
+                 label="direct water-filling")
+        axs.set_xlabel("active relays $K$ (greedy nested sets)", fontsize=13)
+        axs.set_ylabel("SE [bits/s/Hz]", fontsize=13)
+        axs.set_xticks(Ks); axs.tick_params(labelsize=11)
+        axs.legend(fontsize=10.5, loc="lower right"); axs.grid(alpha=0.3)
         figs.tight_layout()
         ps = f"{C.OUT}/exp2_gain_k{k_ext}_single.pdf"
         figs.savefig(ps); print("saved", ps)
 
     wf_tol = 0.5 if selftest else 5e-2          # short PGA can't fully close the tie
-    ok = (mono and abs(opt[0] - wf) < wf_tol
+    ok = (mono and hier and abs(opt[0] - wf) < wf_tol
           and all(o >= b - 1e-6 for o, b in zip(opt, base))
           and abl["joint"] >= max(abl["Tx only"], abl["relay only"]) - 5e-2)
     return ok

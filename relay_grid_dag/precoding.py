@@ -44,14 +44,44 @@ def _physical_W(What, L):
     return torch.linalg.solve_triangular(L.mH, What.mH, upper=True).mH
 
 
-def _merge_mi(scene, src, subset, dst, F, What, *, sigma_r, sigma_d, k_wave):
+def _relay_trKs(scene, src, subset, F, sigma_r, k_wave):
+    """Traces ``tr K_ll(F)`` of each relay's received covariance
+    (differentiable in ``F``); the scalar-relay analogue of :func:`_relay_chols`.
+    """
+    ts = []
+    for nm in subset:
+        A = scene.channel(src, nm, k_wave=k_wave) @ F
+        n = A.shape[0]
+        ts.append((A.abs() ** 2).sum() + (sigma_r ** 2) * n)
+    return ts
+
+
+def _physical_Ws(scene, src, subset, F, What, sigma_r, k_wave, relay_structure):
+    """Physical relay matrices for the whitened leaves, for either structure.
+
+    ``"full"``: ``W_l = What_l L_l^{-1}`` (n x n leaves). ``"scalar"``: leaves are
+    1x1 whitened gains ``wtilde_l = w_l sqrt(tr K_ll)`` and
+    ``W_l = (wtilde_l / sqrt(tr K_ll)) I`` --- the same fixed-ball trick, since
+    ``tr(W_l K_ll W_l^H) = |wtilde_l|^2``.
+    """
+    if relay_structure == "scalar":
+        ts = _relay_trKs(scene, src, subset, F, sigma_r, k_wave)
+        return [(w.reshape(()) / torch.sqrt(t)) *
+                torch.eye(scene.n_ant(nm), dtype=DTYPE)
+                for w, t, nm in zip(What, ts, subset)]
+    Ls = _relay_chols(scene, src, subset, F, sigma_r, k_wave)
+    return [_physical_W(w, L) for w, L in zip(What, Ls)]
+
+
+def _merge_mi(scene, src, subset, dst, F, What, *, sigma_r, sigma_d, k_wave,
+              relay_structure="full"):
     """Merge-channel MI for the whitened leaves ``(F, {What_l})``.
 
     Differentiable in ``F`` (through the channels, the whitening ``L_l``, and the
-    de-whitening) and in every ``What_l``.
+    de-whitening) and in every ``What_l``. With ``relay_structure="scalar"`` the
+    leaves are 1x1 whitened complex gains (optimized scalar-AF).
     """
-    Ls = _relay_chols(scene, src, subset, F, sigma_r, k_wave)
-    Ws = [_physical_W(w, L) for w, L in zip(What, Ls)]
+    Ws = _physical_Ws(scene, src, subset, F, What, sigma_r, k_wave, relay_structure)
     spec = multirelay_merge(scene, src, subset, dst, sigma_r=sigma_r, sigma_d=sigma_d,
                             k_wave=k_wave, precoder=F,
                             relay_mats=Ws if subset else None)
@@ -66,36 +96,64 @@ def _proj_ball(M, P):
     return M * math.sqrt(P / nrm2)
 
 
+def _proj_relays(What, P_relay, power_mode, P_R_tot):
+    """Project the whitened relay leaves onto their power set.
+
+    ``"per_relay"``: each leaf onto its own ball ``‖What_l‖_F^2 <= P_relay``.
+    ``"total"``: all leaves jointly onto the single ball
+    ``sum_l ‖What_l‖_F^2 <= P_R_tot`` (one radial scaling of the stacked
+    leaves) --- a network-total relay power budget.
+    """
+    if power_mode == "per_relay":
+        return [_proj_ball(w, P_relay) for w in What]
+    tot = sum(float((w.abs() ** 2).sum()) for w in What)
+    if tot <= P_R_tot or not What:
+        return What
+    s = math.sqrt(P_R_tot / tot)
+    return [w * s for w in What]
+
+
 def _randc(a, b, g):
     """Random complex matrix ~ CN(0, I) via generator ``g`` (reproducible)."""
     return torch.complex(torch.randn(a, b, generator=g, dtype=torch.float64),
                          torch.randn(a, b, generator=g, dtype=torch.float64))
 
 
-def _build_init(scene, src, subset, *, P_tx, P_relay, sigma_r, k_wave, d, F_init, W_init, g):
+def _build_init(scene, src, subset, *, P_tx, P_relay, sigma_r, k_wave, d, F_init, W_init, g,
+                relay_structure="full", power_mode="per_relay", P_R_tot=None):
     """Initial ``(F, {What})`` for one start. RANDOM by default (generator ``g``);
     a supplied warm start ``F_init`` / ``W_init`` (physical) overrides where given
     --- a zero ``W_init[i]`` leaves relay ``i`` off. Each block is projected onto
-    its power ball.
+    its power ball (jointly, under a total relay budget).
     """
     n_tx = scene.n_ant(src)
     if F_init is not None:
         F0 = _proj_ball(F_init.detach().to(DTYPE).clone(), P_tx)
     else:
         F0 = _proj_ball(_randc(n_tx, d, g), P_tx)
-    Ls = _relay_chols(scene, src, subset, F0, sigma_r, k_wave)
     What0 = []
-    for i, L in enumerate(Ls):
-        if W_init is not None and i < len(W_init) and W_init[i] is not None:
-            What0.append(_proj_ball(W_init[i].detach().to(DTYPE) @ L, P_relay))
-        else:
-            n = L.shape[0]
-            What0.append(_proj_ball(_randc(n, n, g), P_relay))
-    return F0, What0
+    if relay_structure == "scalar":
+        ts = _relay_trKs(scene, src, subset, F0, sigma_r, k_wave)
+        for i, t in enumerate(ts):
+            if W_init is not None and i < len(W_init) and W_init[i] is not None:
+                w = W_init[i].detach().to(DTYPE).reshape(-1)[0]
+                What0.append(_proj_ball((w * torch.sqrt(t)).reshape(1, 1), P_relay))
+            else:
+                What0.append(_proj_ball(_randc(1, 1, g), P_relay))
+    else:
+        Ls = _relay_chols(scene, src, subset, F0, sigma_r, k_wave)
+        for i, L in enumerate(Ls):
+            if W_init is not None and i < len(W_init) and W_init[i] is not None:
+                What0.append(_proj_ball(W_init[i].detach().to(DTYPE) @ L, P_relay))
+            else:
+                n = L.shape[0]
+                What0.append(_proj_ball(_randc(n, n, g), P_relay))
+    return F0, _proj_relays(What0, P_relay, power_mode, P_R_tot)
 
 
 def _optimize_single(scene, src, subset, dst, F0, What0, *, P_tx, P_relay,
-                     sigma_r, sigma_d, k_wave, iters, step, step_min, freeze_F=False):
+                     sigma_r, sigma_d, k_wave, iters, step, step_min, freeze_F=False,
+                     relay_structure="full", power_mode="per_relay", P_R_tot=None):
     """One PGA run from the given start ``(F0, {What0})``; adaptive step
     (grow on accept, halve on reject) with best-iterate tracking. Returns
     ``(best_mi_bits, F, W_list)``. With ``freeze_F`` the Tx precoder is held at
@@ -106,24 +164,29 @@ def _optimize_single(scene, src, subset, dst, F0, What0, *, P_tx, P_relay,
     def value(F_, What_):
         with torch.no_grad():
             return float(_merge_mi(scene, src, subset, dst, F_, What_,
-                                   sigma_r=sigma_r, sigma_d=sigma_d, k_wave=k_wave))
+                                   sigma_r=sigma_r, sigma_d=sigma_d, k_wave=k_wave,
+                                   relay_structure=relay_structure))
 
     def physical(F_, What_):
-        Ls = _relay_chols(scene, src, subset, F_, sigma_r, k_wave)
-        return [_physical_W(w, L).detach().clone() for w, L in zip(What_, Ls)]
+        with torch.no_grad():
+            return [W.detach().clone() for W in
+                    _physical_Ws(scene, src, subset, F_, What_, sigma_r, k_wave,
+                                 relay_structure)]
 
     best = (value(F, What), F.detach().clone(), physical(F, What))
     for _ in range(iters):
         F_l = F.detach().requires_grad_(True)
         What_l = [w.detach().requires_grad_(True) for w in What]
         I = _merge_mi(scene, src, subset, dst, F_l, What_l,
-                      sigma_r=sigma_r, sigma_d=sigma_d, k_wave=k_wave)
+                      sigma_r=sigma_r, sigma_d=sigma_d, k_wave=k_wave,
+                      relay_structure=relay_structure)
         I_cur = float(I.detach())
         grads = torch.autograd.grad(I, [F_l] + What_l)
         with torch.no_grad():
             F_new = F if freeze_F else _proj_ball(F + step * grads[0], P_tx)
-            What_new = [_proj_ball(w + step * gg, P_relay)
-                        for w, gg in zip(What, grads[1:])]
+            What_new = _proj_relays([w + step * gg
+                                     for w, gg in zip(What, grads[1:])],
+                                    P_relay, power_mode, P_R_tot)
         I_new = value(F_new, What_new)
         if I_new >= I_cur:
             F, What = F_new, What_new
@@ -140,7 +203,8 @@ def _optimize_single(scene, src, subset, dst, F0, What0, *, P_tx, P_relay,
 def optimize_precoders(scene, src, subset, dst, *, P_tx=100.0, P_relay=100.0,
                        sigma_r=1.0, sigma_d=1.0, k_wave=K_WAVE, d=None,
                        iters=400, step=0.05, step_min=1e-8,
-                       restarts=1, seed=0, F_init=None, W_init=None, freeze_F=False):
+                       restarts=1, seed=0, F_init=None, W_init=None, freeze_F=False,
+                       relay_structure="full", power_mode="per_relay", P_R_tot=None):
     """Maximize the merge-channel MI over ``(F, {W_l})`` --- the SPEC.md Sec. 4 engine.
 
     Initialization is RANDOM (seeded, reproducible) by default; ``restarts`` runs
@@ -155,6 +219,13 @@ def optimize_precoders(scene, src, subset, dst, *, P_tx=100.0, P_relay=100.0,
     Because the start is random, the returned MI is the best stationary point
     found, not a certified optimum; it exceeds the conventional scalar-AF relay
     empirically (large margin in practice), not by construction.
+
+    ``relay_structure="scalar"`` restricts each relay to an optimized complex
+    scalar gain ``W_l = w_l I`` (the optimized scalar-AF baseline), via 1x1
+    whitened leaves on the same fixed power ball. ``power_mode="total"``
+    replaces the per-relay budgets by the single network-total constraint
+    ``sum_l tr(W_l K_ll W_l^H) <= P_R_tot`` (default ``P_R_tot=P_relay``),
+    projected by one joint radial scaling.
     """
     subset = list(subset)
     if len(set(subset)) != len(subset):
@@ -162,6 +233,11 @@ def optimize_precoders(scene, src, subset, dst, *, P_tx=100.0, P_relay=100.0,
     if P_tx <= 0 or P_relay <= 0:
         raise ValueError(f"power budgets must be positive (P_tx={P_tx}, "
                          f"P_relay={P_relay})")
+    if relay_structure not in ("full", "scalar"):
+        raise ValueError(f"unknown relay_structure: {relay_structure!r}")
+    if power_mode not in ("per_relay", "total"):
+        raise ValueError(f"unknown power_mode: {power_mode!r}")
+    P_R_tot = P_relay if P_R_tot is None else P_R_tot
     n_tx = scene.n_ant(src)
     d = n_tx if d is None else d
     best = None
@@ -170,11 +246,14 @@ def optimize_precoders(scene, src, subset, dst, *, P_tx=100.0, P_relay=100.0,
         F0, What0 = _build_init(scene, src, subset, P_tx=P_tx, P_relay=P_relay,
                                 sigma_r=sigma_r, k_wave=k_wave, d=d,
                                 F_init=(F_init if (r == 0 or freeze_F) else None),
-                                W_init=(W_init if r == 0 else None), g=g)
+                                W_init=(W_init if r == 0 else None), g=g,
+                                relay_structure=relay_structure,
+                                power_mode=power_mode, P_R_tot=P_R_tot)
         cand = _optimize_single(scene, src, subset, dst, F0, What0, P_tx=P_tx,
                                 P_relay=P_relay, sigma_r=sigma_r, sigma_d=sigma_d,
                                 k_wave=k_wave, iters=iters, step=step, step_min=step_min,
-                                freeze_F=freeze_F)
+                                freeze_F=freeze_F, relay_structure=relay_structure,
+                                power_mode=power_mode, P_R_tot=P_R_tot)
         if best is None or cand[0] > best[0]:
             best = cand
     return best
