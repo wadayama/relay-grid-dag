@@ -67,19 +67,40 @@ def main(selftest=False):
     axL.plot(dists, dir_n, "^:", color="0.35", label="direct only, near")
     axL.plot(dists, dir_f, "v:", color="0.65", label="direct only, far")
     axL.axvline(RAYLEIGH, ls="--", color="tab:purple", lw=1.3,
-                label=rf"Rayleigh $\approx{RAYLEIGH:.1f}\lambda$")
-    axL.set_xlabel(r"Tx--Rx distance $d_{\mathrm{TR}}$ [$\lambda$]")
-    axL.set_ylabel("SE [bits/s/Hz]")
+                label=rf"Rayleigh $={RAYLEIGH:.1f}\lambda$")
+    axL.set_xlabel(r"Tx--Rx distance $d_{\mathrm{TR}}$ [$\lambda$]", fontsize=13)
+    axL.set_ylabel("SE [bits/s/Hz]", fontsize=13)
+    axL.tick_params(labelsize=11)
     axR = axL.twinx()
     axR.plot(dists, rk_n, "d--", color="tab:green", alpha=0.75,
              label="direct eff-rank, near")
-    axR.set_ylabel("direct-channel effective rank", color="tab:green")
-    axR.tick_params(axis="y", labelcolor="tab:green")
+    axR.set_ylabel("direct-channel effective rank", color="tab:green",
+                   fontsize=13)
+    axR.tick_params(axis="y", labelcolor="tab:green", labelsize=11)
     axR.set_ylim(bottom=0.9)
-    axL.legend(loc="upper right", fontsize=8.5)
+    axL.legend(loc="upper right", fontsize=10.5)
     axL.grid(alpha=0.3)
     fig.tight_layout()
     p = f"{C.OUT}/exp4_nearfield.pdf"; fig.savefig(p); print("saved", p)
+
+    # SE-only variant (conference layout: no twin rank axis; the effective
+    # rank is reported in the text with its definition)
+    figs, axs = plt.subplots(figsize=(7.6, 4.3))
+    axs.plot(dists, opt_n, "o-", color="tab:blue",
+             label=f"optimized, near ($K={K}$)")
+    axs.plot(dists, opt_f, "s-", color="tab:red", alpha=0.85,
+             label="optimized, far (same sites)")
+    axs.plot(dists, dir_n, "^:", color="0.35", label="direct only, near")
+    axs.plot(dists, dir_f, "v:", color="0.65", label="direct only, far")
+    axs.axvline(RAYLEIGH, ls="--", color="tab:purple", lw=1.3,
+                label=rf"Rayleigh $={RAYLEIGH:.1f}\lambda$")
+    axs.set_xlabel(r"Tx--Rx distance $d_{\mathrm{TR}}$ [$\lambda$]", fontsize=13)
+    axs.set_ylabel("SE [bits/s/Hz]", fontsize=13)
+    axs.tick_params(labelsize=11)
+    axs.legend(loc="upper right", fontsize=10.5)
+    axs.grid(alpha=0.3)
+    figs.tight_layout()
+    ps = f"{C.OUT}/exp4_nearfield_se.pdf"; figs.savefig(ps); print("saved", ps)
 
     ok = (np.all(np.isfinite(opt_n)) and np.all(np.array(rk_f) <= 1.0 + 1e-6)
           and np.all(np.array(opt_n) >= np.array(dir_n) - 1e-6))

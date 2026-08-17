@@ -25,6 +25,7 @@ DT = rgd.DTYPE
 P_TX = P_RELAY = 100.0
 SIG = 1.0
 K_MAX = 4
+K_EXT = 8                   # extended sweep for the conference companion figure
 K_ABL = 3
 SEL_ITERS = 100             # greedy-selection engine depth (warm-started)
 EVAL_ITERS = 300            # reporting depth
@@ -76,10 +77,14 @@ def main(selftest=False):
     restarts = 1 if selftest else RESTARTS
 
     # ---- (a) gain vs K along the greedy nested sets --------------------------
-    order = greedy_nested(scene, names, K_MAX, iters=sel_iters)
+    # Greedy is prefix-consistent, so one run to k_ext yields every S_k; the
+    # original figure uses the K<=K_MAX slice (unchanged), the conference
+    # companion extends the sweep to K_EXT.
+    k_ext = K_MAX if selftest else K_EXT
+    order = greedy_nested(scene, names, k_ext, iters=sel_iters)
     print(f"greedy add order: {order}  (S_k = first k)")
     Ks, base, opt = [], [], []
-    for k in range(K_MAX + 1):
+    for k in range(k_ext + 1):
         subset = [names[i] for i in sorted(order[:k])]
         Ks.append(k)
         base.append(rgd.subset_mi(scene, subset))
@@ -94,7 +99,7 @@ def main(selftest=False):
                                    P_TX)[0]
     print(f"tie: f(empty)={opt[0]:.4f} vs direct water-filling={wf:.4f} "
           f"(gap {abs(opt[0] - wf):.1e})")
-    mono = all(opt[i + 1] >= opt[i] - 1e-3 for i in range(K_MAX))
+    mono = all(opt[i + 1] >= opt[i] - 1e-3 for i in range(k_ext))
     print(f"tie: monotone in K: {mono}")
 
     # ---- (b) ablation at the fixed S_{K_ABL} ---------------------------------
@@ -114,26 +119,47 @@ def main(selftest=False):
         print(f"  ablation {k:10s} = {v:6.2f} bits/s/Hz")
 
     # ---- figure ---------------------------------------------------------------
-    fig, (axa, axb) = plt.subplots(1, 2, figsize=(11.6, 4.2),
-                                   gridspec_kw={"width_ratios": [1.25, 1.0]})
-    axa.plot(Ks, base, "o--", color="0.5", label="conventional scalar-AF")
-    axa.plot(Ks, opt, "s-", color="tab:blue", label="optimized MI $f(S_K)$")
-    axa.plot([0], [wf], "*", color="tab:red", ms=13, zorder=6,
-             label="direct water-filling")
-    axa.set_xlabel("active relays $K$ (greedy nested sets)")
-    axa.set_ylabel("SE [bits/s/Hz]")
-    axa.set_xticks(Ks); axa.legend(fontsize=9); axa.grid(alpha=0.3)
-    axa.set_title("(a) precoding gain vs $K$")
-    labels = list(abl.keys()); vals = [abl[k] for k in labels]
-    colors = ["0.6", "tab:orange", "tab:green", "tab:blue"]
-    bars = axb.bar(labels, vals, color=colors)
-    for b, v in zip(bars, vals):
-        axb.text(b.get_x() + b.get_width() / 2, v + 0.3, f"{v:.1f}", ha="center",
-                 fontsize=10)
-    axb.set_ylabel("SE [bits/s/Hz]"); axb.grid(axis="y", alpha=0.3)
-    axb.set_title(f"(b) ablation at the $K={K_ABL}$ set")
-    fig.tight_layout()
-    p = f"{C.OUT}/exp2_precoding_gain.pdf"; fig.savefig(p); print("saved", p)
+    def draw_gain(ax, kmax, title):
+        sl = slice(0, kmax + 1)
+        ax.plot(Ks[sl], base[sl], "o--", color="0.5",
+                label="conventional scalar-AF")
+        ax.plot(Ks[sl], opt[sl], "s-", color="tab:blue",
+                label="optimized MI $f(S_K)$")
+        ax.plot([0], [wf], "*", color="tab:red", ms=13, zorder=6,
+                label="direct water-filling")
+        ax.set_xlabel("active relays $K$ (greedy nested sets)", fontsize=13)
+        ax.set_ylabel("SE [bits/s/Hz]", fontsize=13)
+        ax.set_xticks(Ks[sl]); ax.tick_params(labelsize=11)
+        ax.legend(fontsize=11); ax.grid(alpha=0.3)
+        if title:
+            ax.set_title(title)
+
+    def gain_ablation_figure(kmax, outfile):
+        """The two-panel figure with panel (a) truncated at ``kmax``."""
+        fig, (axa, axb) = plt.subplots(1, 2, figsize=(11.6, 4.2),
+                                       gridspec_kw={"width_ratios": [1.25, 1.0]})
+        draw_gain(axa, kmax, "(a) precoding gain vs $K$")
+        labels = list(abl.keys()); vals = [abl[k] for k in labels]
+        colors = ["0.6", "tab:orange", "tab:green", "tab:blue"]
+        bars = axb.bar(labels, vals, color=colors)
+        for b, v in zip(bars, vals):
+            axb.text(b.get_x() + b.get_width() / 2, v + 0.3, f"{v:.1f}",
+                     ha="center", fontsize=10)
+        axb.set_ylabel("SE [bits/s/Hz]"); axb.grid(axis="y", alpha=0.3)
+        axb.set_title(f"(b) ablation at the $K={K_ABL}$ set")
+        fig.tight_layout()
+        p = f"{C.OUT}/{outfile}"; fig.savefig(p); print("saved", p)
+
+    gain_ablation_figure(K_MAX, "exp2_precoding_gain.pdf")
+    if k_ext > K_MAX:
+        gain_ablation_figure(k_ext, f"exp2_precoding_gain_k{k_ext}.pdf")
+        # single-panel gain-only variant (conference layout: the ablation is
+        # reported in the text, so panel (a) alone fits a single column)
+        figs, axs = plt.subplots(figsize=(6.4, 4.4))
+        draw_gain(axs, k_ext, "")
+        figs.tight_layout()
+        ps = f"{C.OUT}/exp2_gain_k{k_ext}_single.pdf"
+        figs.savefig(ps); print("saved", ps)
 
     wf_tol = 0.5 if selftest else 5e-2          # short PGA can't fully close the tie
     ok = (mono and abs(opt[0] - wf) < wf_tol

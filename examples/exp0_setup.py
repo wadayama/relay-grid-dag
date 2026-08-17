@@ -27,7 +27,8 @@ def _elements(ax, scene, name, color, ms=2.4):
     ax.plot(P[:, 0], P[:, 1], "o", ms=ms, color=color, zorder=8)
 
 
-def _panel_single(ax, scene, names, coords):
+def _panel_single(ax, scene, names, coords,
+                  title="(a) single pair (canonical scene)"):
     # candidate sites + their element positions
     ax.scatter(coords[:, 0], coords[:, 1], s=90, facecolors="0.88", edgecolors="k",
                linewidths=0.5, zorder=3, label=f"candidate relays (L={len(names)})")
@@ -42,8 +43,10 @@ def _panel_single(ax, scene, names, coords):
     _elements(ax, scene, "rx", "tab:green")
     # direct link (partially blocked)
     ax.plot([0, 20], [0, 0], ls="--", lw=1.3, color="0.4", zorder=2)
-    ax.annotate(r"direct link $\kappa_d=0.3$", (3.0, 0.45), ha="center", va="bottom",
-                fontsize=9, color="0.3")
+    ax.annotate(r"direct $\mathbf{H_{\mathrm{sd}}}$"
+                "\n" + r"$\mathbf{\kappa_d=0.3}$", (3.0, 0.45),
+                ha="center", va="bottom", fontsize=9.5, color="0.15",
+                fontweight="bold", linespacing=1.15)
     # Rayleigh distance arc around the Tx
     th = np.linspace(-0.42 * np.pi, 0.42 * np.pi, 200)
     ax.plot(RAYLEIGH_1P * np.cos(th), RAYLEIGH_1P * np.sin(th), ls=":", lw=1.4,
@@ -56,11 +59,13 @@ def _panel_single(ax, scene, names, coords):
                            ls="-", lw=0.8, edgecolor="0.6", zorder=1))
     dx = (gx[1] - gx[0]) / (C.GRID_NX - 1)
     dy = (gy[1] - gy[0]) / (C.GRID_NY - 1)
-    ax.annotate(rf"$5\times5$ grid, ${dx:.0f}\lambda\times{dy:.0f}\lambda$ pitch",
+    ax.annotate(rf"$\mathbf{{5\times5}}$ grid, "
+                rf"$\mathbf{{{dx:.0f}\lambda\times{dy:.0f}\lambda}}$ pitch",
                 (gx[0] + (gx[1] - gx[0]) / 2, 5.35), ha="center", va="bottom",
-                fontsize=9, color="0.3")
-    ax.set_title("(a) single pair (canonical scene)")
-    ax.legend(loc="lower left", fontsize=8, framealpha=0.9)
+                fontsize=9.5, color="0.15", fontweight="bold")
+    ax.set_title(title)
+    ax.legend(loc="lower left", fontsize=8, framealpha=0.9,
+              markerscale=0.55, labelspacing=0.7, handletextpad=0.6)
 
 
 def _panel_pair(ax, scene, names, coords):
@@ -113,6 +118,47 @@ def main():
         ax.grid(True, lw=0.3, alpha=0.45)
     fig.tight_layout()
     p = f"{C.OUT}/exp0_setup.pdf"; fig.savefig(p); print("saved", p)
+
+    # single-pair-only variant (conference layout: the canonical scene alone,
+    # no panel label -- the caption names it). figsize matches the equal-aspect
+    # data box (28 x 13.6 lambda) and bbox_inches trims the residual margins,
+    # so the PDF carries no letterboxing above/below the axes. The conference
+    # figure doubles as the system schematic: it marks an active subset (the
+    # greedy K=3 set of exp1_engine, pinned by seed) and carries the model
+    # labels F, W_l, H_sr, H_rd, kappa_d*H_sd.
+    ACTIVE = [1, 10, 22]                # exp1's greedy K=3 set (pinned seed)
+    figs, axs = plt.subplots(figsize=(6.6, 3.6))
+    _panel_single(axs, s1, names1, coords1, title="")
+    act = coords1[ACTIVE]
+    for (ax_, ay_) in act:              # hops Tx -> relay -> Rx
+        axs.plot([0.0, ax_], [0.0, ay_], color="#ff2bd6", lw=1.0, alpha=0.65,
+                 zorder=4)
+        axs.plot([ax_, 20.0], [ay_, 0.0], color="#ff2bd6", lw=1.0, alpha=0.65,
+                 zorder=4)
+    axs.scatter(act[:, 0], act[:, 1], s=150, facecolors="none",
+                edgecolors="#ff2bd6", linewidths=2.0, zorder=7,
+                label=r"active subset $S$ ($K=3$)")
+    lx, ly = act[np.argmax(act[:, 1])]  # label the hops via the TOP relay
+    axs.annotate(r"$\mathbf{H}_{\mathrm{sr}}^{(\ell)}$",
+                 (lx / 2, ly / 2), xytext=(lx / 2 - 2.6, ly / 2 + 0.6),
+                 fontsize=11, color="#c1149f", fontweight="bold")
+    axs.annotate(r"$\mathbf{H}_{\mathrm{rd}}^{(\ell)}$",
+                 ((lx + 20) / 2, ly / 2),
+                 xytext=((lx + 20) / 2 + 0.6, ly / 2 + 0.6),
+                 fontsize=11, color="#c1149f", fontweight="bold")
+    axs.annotate(r"$\mathbf{W}_\ell$", (lx, ly), xytext=(lx + 0.9, ly + 0.5),
+                 fontsize=11, color="#c1149f", fontweight="bold")
+    axs.annotate(r"$\mathbf{F}$", (0, 0), xytext=(-1.9, 1.3),
+                 fontsize=11, color="tab:red", fontweight="bold")
+    axs.legend(loc="lower left", fontsize=8, framealpha=0.9,
+               markerscale=0.55, labelspacing=0.7, handletextpad=0.6)
+    axs.set_xlabel(r"x [$\lambda$]"); axs.set_ylabel(r"y [$\lambda$]")
+    axs.set_aspect("equal", adjustable="box")
+    axs.set_xlim(-3.0, 25.0); axs.set_ylim(-6.8, 6.8)
+    axs.grid(True, lw=0.3, alpha=0.45)
+    figs.tight_layout()
+    ps = f"{C.OUT}/exp0_setup_single.pdf"
+    figs.savefig(ps, bbox_inches="tight", pad_inches=0.02); print("saved", ps)
     return len(names1) == 25 and len(names2) == 25
 
 
