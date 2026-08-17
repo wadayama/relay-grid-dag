@@ -279,7 +279,7 @@ achieves `SE_HD = (1/2) SE_FD`. We keep the ½ out of the code: figures/tables r
 The methods consumed here — the K-recursion, the log-det MI, and the
 Wirtinger-gradient PGA — are the version of record in:
 
-> T. Wadayama and Na Siqi, *Mutual Information Optimization via K-Recursion and
+> T. Wadayama and Siqi Na, *Mutual Information Optimization via K-Recursion and
 > Automatic Differentiation for Linear Gaussian Wireless Networks*,
 > arXiv:2606.06982 [cs.IT], 2026. <https://arxiv.org/abs/2606.06982>
 
