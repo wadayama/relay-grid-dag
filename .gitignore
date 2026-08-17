@@ -30,3 +30,10 @@ icc2027/
 
 # stray LaTeX artifact from an interrupted run
 texput.log
+
+# Non-code material is never published: manuscripts, notes, docs, math notes
+paper/
+docs/
+references/
+notes/
+MATH.md

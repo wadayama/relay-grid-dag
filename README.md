@@ -22,7 +22,7 @@ geometry  ──►  {H_k}  ──►  precoded merge  ──►  AD/PGA engine 
 
 The channel model and the K-recursion are never reimplemented here — they come from
 the sibling `gaussian-dag` (single-root MI) and `cmi-dag` (multi-root conditional
-MI). The mathematics is summarised in [`MATH.md`](MATH.md).
+MI).
 
 ## Architecture and dependencies
 
@@ -87,22 +87,14 @@ relay-grid-dag/
 │   └── __init__.py            public API (physics re-exports + precoding + selection)
 ├── examples/            runnable experiment suite (exp0–exp7) + interactive demos
 ├── archive/             superseded code (reference only, not imported)
-├── docs/                a five-part tutorial walkthrough
-├── references/          background notes + key literature
 ├── tests/               regression tests (physics + precoding + selection + multi-pair)
-├── MATH.md              mathematical foundations
 └── pyproject.toml
 ```
 
 ## Documentation
 
-- [`MATH.md`](MATH.md) — mathematical foundations of the selection layer (merge
-  channel MI, the selection problem, the strategies, continuous-to-discrete, OFDM
-  shared activation, and the FD/HD duplexing convention).
-- [`docs/`](docs/) — a five-part tutorial, from a first selection to the duplexing
-  convention.
-- Per-directory `README.md` files document the package (`relay_grid_dag/`), the
-  runnable studies (`examples/`), the tests (`tests/`), and the references.
+Per-directory `README.md` files document the package (`relay_grid_dag/`),
+the runnable studies (`examples/`), and the tests (`tests/`).
 
 ## Quick start
 
@@ -145,6 +137,49 @@ sumrate = sum(rgd.subset_mi(scene, [names[i] for i in g], k_wave=k) for k in k_w
 See [`examples/`](examples/) for the runnable experiment suite (`exp0_setup.py`
 through `exp7_mimap.py`, one figure each) and the interactive demos
 (`relay_grid_demo.py`, `relay_grid_demo_2pair.py`).
+
+## Reproducing the ICC 2027 experiments
+
+Every figure, table, and reported number of the conference paper
+*"Near-Field Relay Grid: Differentiable Joint Precoding and Relay
+Selection"* is produced by the scripts below, with pinned seeds. From a
+fresh clone:
+
+```bash
+uv sync --extra examples           # one-shot environment (see Installation)
+uv run pytest                      # the 38 tie-point tests binding paper and code
+uv run python examples/run_all.py  # smoke test: every experiment at reduced depth
+```
+
+Full-depth runs (figures land in `examples/out/`):
+
+| Paper item | Command | Output | Runtime* |
+| --- | --- | --- | --- |
+| Fig. 1 (setup, to scale) | `uv run python examples/exp0_setup.py` | `exp0_setup_single.pdf` | seconds |
+| EXP1 numbers (in text) | `uv run python examples/exp1_engine.py` | console + `exp1_engine.pdf` | minutes |
+| Fig. 2 (gain vs `K`) | `uv run python examples/exp2_precoding_gain.py` | `exp2_gain_k8_single.pdf` | minutes |
+| Table I + Fig. 3 (selection, MI maps) | `uv run python examples/exp3_selection.py` | console values + `exp3_mimap_rx.pdf` | ~35 min |
+| Table I, `K=4` oracle entry | `uv run python examples/exp3_selection.py --oracle-k4` | `exp3_oracle_k4.json` | hours (checkpointed) |
+| Fig. 4 (near vs far field) | `uv run python examples/exp4_nearfield.py` | `exp4_nearfield_se.pdf` | ~10 min |
+
+*single-threaded PyTorch on an Apple M3 Ultra CPU, `complex128`.
+
+Notes:
+
+- **The `K=4` oracle is optional and slow.** It enumerates all
+  C(25,4) = 12,650 subsets at the full reporting depth, checkpoints every
+  200 subsets (`exp3_oracle_k4_values.npz`), resumes automatically if
+  interrupted, and caches its result in `exp3_oracle_k4.json`. Later
+  `exp3_selection.py` runs pick the cached value up automatically; without
+  the cache they simply omit the oracle entry. All other rows are
+  independent and can run in any order.
+- **Consistency.** The MI maps of Fig. 3 are rendered from the same
+  reporting-depth precoders that produce the reported rates; the tie-point
+  suite (`uv run pytest`) enforces this paper-to-code binding.
+- The same scripts also emit the arXiv-version layouts
+  (`exp0_setup.pdf`, `exp2_precoding_gain.pdf`, `exp3_selection.pdf`,
+  `exp3_field_k.pdf`, `exp4_nearfield.pdf`); see
+  [`examples/README.md`](examples/README.md).
 
 ## Public API
 
