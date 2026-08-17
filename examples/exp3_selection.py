@@ -250,7 +250,8 @@ def main(selftest=False):
     # reporting-depth precoders (same consistency rule, shared 0-dB reference):
     # the active set and the field follow the moving receiver.
     K3 = 3
-    rx_ys = (4.0, 0.0, -4.0)
+    rx_ys = (4.0, -4.0)      # two extreme stops; the canonical (20,0) case
+                             # is EXP2's K=3 joint configuration
     mob = []                              # (ry, idx, cap, intensity, ..., mimap)
     nx2, ny2 = (60, 34) if selftest else (180, 100)
     xs2 = np.linspace(-2.5, 24.0, nx2); ys2 = np.linspace(-6.5, 6.5, ny2)
@@ -280,7 +281,8 @@ def main(selftest=False):
               f"f(S)={cap_r:6.2f} bits/s/Hz  "
               f"mimap max={mimap.max():.2f}")
     ref_m = max(v.max() for _, _, _, v, _ in mob)    # shared 0-dB reference
-    figm, axesm = plt.subplots(3, 1, figsize=(6.4, 9.0), sharex=True)
+    figm, axesm = plt.subplots(len(mob), 1, figsize=(6.4, 3.0 * len(mob)),
+                               sharex=True)
     for ax, (ry, idx, cap, inten, _) in zip(axesm, mob):
         img = np.clip(10 * np.log10(inten / ref_m + 1e-12),
                       -40, 0).reshape(ny, nx)
@@ -313,7 +315,8 @@ def main(selftest=False):
     # where the probe rate meets or exceeds the reported rate (probes next
     # to the Tx or a radiating relay far exceed it and saturate).
     vmax_mi = max(cap for _, _, cap, _, _ in mob)
-    figq, axesq = plt.subplots(3, 1, figsize=(6.4, 8.4), sharex=True)
+    figq, axesq = plt.subplots(len(mob), 1, figsize=(6.4, 2.8 * len(mob)),
+                               sharex=True)
     for ax, (ry, idx, cap, _, mimap) in zip(axesq, mob):
         im = ax.imshow(mimap, origin="lower",
                        extent=(xs2[0], xs2[-1], ys2[0], ys2[-1]),
