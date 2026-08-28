@@ -13,7 +13,11 @@ uv run python examples/<script>.py --selftest   # reduced depth, headless check
 uv run python examples/run_all.py         # all EXP0-EXP7 at selftest depth
 ```
 
-## Paper experiment suite (Sec. VII; one script per figure)
+## Paper experiment suite (one script per figure)
+
+EXP0–EXP4 produce every figure, table, and in-text number of the ICC 2027
+paper (Sec. V); EXP5–EXP7 (mobility handover, multi-pair interference, MI
+maps) are material for the multi-pair follow-up and are not part of that paper.
 
 Every single-pair experiment uses `_common.canonical_scene()` (the SPEC.md
 Sec. 10 frozen scene: 5x5 = 25-candidate grid, 8/8/4-element ULAs); every
@@ -47,7 +51,7 @@ scene: same 5x5 grid, 4/4/4, pairs at (0,±2.5) → (20,±2.5)).
   the same Scene / optimized precoders as the reported numbers (SPEC.md Sec. 6).
 - **Duplexing.** MI / SE is the idealized full-duplex value `SE_FD = I(X;Y)`; a
   half-duplex realisation carries a 1/2 prefactor on its two-slot MI
-  `SE_HD = (1/2) I(X; Y_1, Y_2)` (paper Remark 2).
+  `SE_HD = (1/2) I(X; Y_1, Y_2)` (paper Sec. I).
 - **Archived.** The pre-redesign experiment scripts (`e1`–`e4`, `x_*`,
   `multipair_interference.py`) are in `../archive/examples_v1/`; the earlier
   isotropic studies in `../archive/examples_isotropic/`.
